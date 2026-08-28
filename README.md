@@ -1,0 +1,18 @@
+# Intelligent Dead Reckoning Navigation System
+
+Smartphone-based vehicle navigation that keeps working through GNSS/NavIC outages (tunnels, urban canyons, jamming) using IMU sensor fusion, a hybrid classical + AI approach, and map-constrained positioning.
+
+Built for SIH — ISRO problem statement on ground vehicle positioning without OBD-II.
+
+## Docs
+- [`docs/PROJECT_BRIEF.md`](docs/PROJECT_BRIEF.md) — problem, approach, team, current status
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full pipeline, module breakdown, MVP scope, presentation website stack
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — phased build plan
+- [`docs/PROJECT_LOG.md`](docs/PROJECT_LOG.md) — running decision log, updated every session
+- [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) — git workflow for collaborators
+
+## Status
+Pre-code — architecture and presentation-MVP scope decided, kickoff (Phase 0/1) not yet started. See PROJECT_LOG.md for the latest.
+
+## License
+MIT — see [LICENSE](LICENSE).
