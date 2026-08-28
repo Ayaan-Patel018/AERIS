@@ -34,8 +34,41 @@ Three architectures were compared:
 | Mapping | — | OSM processing, HMM map matching |
 | Testing/Docs | Ayaan (default until reassigned) | Failure-mode testing, this doc set |
 
+> **Note:** the table above is the full *production* role split. For the actual Sept-4 MVP sprint, see the "Team roles (MVP — 3-day web demo)" section below, which is what's live right now.
+
+## Team roles (MVP — 3-day web demo)
+Reassigned for the Sept-4 MVP sprint. Ayaan wants ~90% ownership of backend and has frontend interest, so backend is Ayaan-led with Anurag on EKF core support; Aryan owns frontend with Ayaan contributing there as secondary.
+
+| Role | Person | Owns |
+|---|---|---|
+| Backend lead | **Ayaan** | Data loader, INS, NHC, outage simulation, GNSS quality detector, JSON export — the whole processing pipeline |
+| EKF core support | Anurag | ES-EKF implementation + tuning alongside Ayaan (highest silent-failure-risk piece — two heads on it) + deployment |
+| Frontend lead | Aryan | Leaflet map, replay animation, controls, charts, UI |
+| Frontend secondary | Ayaan | Contributes to frontend given his interest, once backend milestones are hit |
+| Integration | Anurag + Ayaan | JSON schema agreement, wiring frontend to exported data |
+
+Note: all three are "vibecoders" using AI tools to generate and glue code — see RULES.md for the mandatory pre-push review process this makes necessary.
+
 ## Presentation MVP scope decision
 Given limited time before presentation, the demo surface is a **static web visualization** (`/frontend`, see ARCHITECTURE.md), not a live Android app. The Python EKF/INS pipeline exports precomputed trajectory JSON; the website replays it on a map with an error/confidence chart alongside. Native Android build remains on the roadmap but is not the presentation-critical path.
+
+## Concepts the backend lead should understand (learning order)
+For defending the project and writing the pipeline. Roughly ordered — earlier ones are prerequisites for later ones.
+1. Coordinate frames — phone vs vehicle vs world, and why you transform between them.
+2. What the accelerometer measures — specific force (includes gravity reaction), not acceleration directly.
+3. What the gyroscope measures — angular velocity; integrate it to track orientation.
+4. Sensor bias — a constant offset; integrated twice → position error grows with time².
+5. Integration in navigation — accel → velocity → position, and how errors compound.
+6. Attitude (pitch/roll/yaw) — and why quaternions beat Euler angles (no gimbal singularity).
+7. Kalman filter, conceptually — predict (physics) → compare with measurement → update (weighted by uncertainty).
+8. Error-state EKF — tracks the error, not the full state; more numerically stable.
+9. Non-holonomic constraints — a car can't slide sideways; this kills a lot of drift.
+10. Map matching — snap position to the road network; dramatically improves apparent accuracy.
+11. Covariance/uncertainty — the filter's confidence, and how it governs fusion weight.
+12. ZUPT — detect when stopped, zero the velocity, correct drift for free.
+13. GNSS quality metrics — satellite count, HDOP/VDOP, SNR; what "degraded" looks like.
+14. (Deferred) CNN/GRU basics — input/output shapes of the velocity estimator, not the math.
+15. (Deferred) Quantization — shrinking a model for mobile; not needed for the web MVP.
 
 ## Current phase
 **Phase 0 — Kickoff, not yet started.** See ROADMAP.md for the full phased plan and PROJECT_LOG.md for the running decision/status log.

@@ -2,6 +2,22 @@
 
 Ordered so the highest-silent-failure-risk component (EKF stability) gets validated before time is sunk into ML training on top of it.
 
+> **ACTIVE PLAN: 3-day MVP sprint (Aug 29 → Sept 3, present Sept 4).** The phased plan below is the full production arc; the MVP sprint at the top is what the team is executing right now. See docs/MVP_PLAN (the final PDF) for the hour-by-hour breakdown.
+
+## MVP SPRINT (current — web demo, no Android)
+Crux = EKF + NHC producing a believable position through a simulated GNSS outage. One AI component (GNSS quality detector). No deep-learning training, no Android build, map matching optional (nearest-road only if at all).
+
+**Day 1 (Aug 29)** — Backend: Part I (load/understand IO-VNBD at its real 10 Hz rate) + Part II (minimal INS + ES-EKF, GNSS-only fusion, confirm no divergence). Frontend: scaffold Vite+React+Tailwind+Leaflet+Recharts, mock replay with dummy JSON.
+**Day 2 (Aug 30)** — Backend: Part III (NHC + outage simulation, export the 3 JSON files) + Part V (GNSS quality detector, scikit-learn or rule-based). Frontend: swap in real JSON, add outage banner + status badge + uncertainty circle + metrics panel.
+**Day 3 (Aug 31)** — Integration, polish, error/velocity charts, responsive pass, deploy to Vercel, test on phone + laptop, record fallback video.
+**Sept 1–3** — Buffer for slippage + rehearsal (the sprint is scoped for 3 days but the deadline is the 4th, so these are genuine safety days — don't treat them as extra scope).
+
+Key MVP risk fallbacks (from the plan): dataset too complex → synthetic IMU+GNSS in Python; EKF diverges → complementary filter for attitude + keep NHC; time short → GNSS detector becomes a pure rule-based threshold; schema mismatch → freeze JSON schema at end of Part III.
+
+---
+
+## Full production arc (post-MVP reference)
+
 ## Phase 0 — Kickoff (before any of this)
 - [ ] Confirm team roles (see PROJECT_BRIEF.md)
 - [ ] Confirm repo access for all collaborators, agree on branch/commit convention (see CONTRIBUTING.md)
