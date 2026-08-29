@@ -82,6 +82,32 @@ Timestamped, append-only. One entry per working session: what changed, what was 
 
 ---
 
+## 2026-08-29 — Part II DONE: ES-EKF running, ablation confirmed working
+**Did:**
+- Wrote `backend/ins_ekf.py`: full 15-state ES-EKF with nominal quaternion state + separate error state, local ENU conversion, GPS displacement-window yaw init with unobservable flag, GNSS outage as first-class per-step flag, hard-threshold NHC pseudo-measurement, GPS velocity update, 4-mode ablation, position error evaluation, JSON export matching the agreed schema.
+- **Confirmed working on S-S3b** — ran all 4 modes with a 60-second outage (200–260 s):
+
+| Mode | Mean error | RMSE | Max |
+|---|---|---|---|
+| ins_only | 13,658 m | 16,816 m | 34,071 m |
+| ins_gnss | 193 m | 805 m | 6,911 m |
+| ins_nhc | 572 m | 644 m | 1,112 m |
+| **full** | **73 m** | **79 m** | **167 m** |
+
+- Plot confirms: full system (green) tracks the reference through the outage; ins_only (orange) drifts 34 km off; ins_gnss (blue) spikes hard during the outage; ins_nhc (purple) stays contained without GPS. The comparison chart is the SIH slide.
+- JSON files exported to `backend/exports/`: `reference_trajectory.json`, `gnss_only.json`, `fused_output.json`. These are ready for Aryan to wire into the frontend.
+- **One known issue (non-blocking):** `ins_only` trajectory starts pointing in the wrong direction — likely a yaw initialization issue (vehicle may be near-stationary at t=0, making GPS displacement heading unreliable). The `full` mode is unaffected. Fix in a tuning pass before the demo.
+
+**Decided:** JSON schema is now effectively locked by the exported files. Aryan can start wiring frontend against these. Any schema change needs announcement to both tracks (per RULES.md).
+
+**Open:**
+- Yaw init tuning for `ins_only` mode (non-blocking — `full` mode is fine)
+- Part III: outage simulation for multiple window lengths (30s/60s/120s) and export all variants
+- Part V: GNSS quality detector
+- Frontend: Aryan to scaffold and wire against the exported JSONs
+
+---
+
 ## 2026-08-29 (later) — Architecture doc enriched from full design source
 **Did:** Re-read the full 27-part design doc and pulled in everything viable that the condensed version had dropped:
 - Replaced the small pipeline sketch with the full 12-module block diagram (ARCHITECTURE.md), with a note that 100 Hz was the design target but IO-VNBD is ~10 Hz.

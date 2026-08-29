@@ -1,3 +1,4 @@
 IO-VNBD/
-
 nav-env/
+__pycache__/
+*.pyc
