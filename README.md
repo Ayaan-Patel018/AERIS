@@ -10,6 +10,7 @@ Built for SIH — ISRO problem statement on ground vehicle positioning without O
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — 3-day MVP sprint + full production arc
 - [`docs/PROJECT_LOG.md`](docs/PROJECT_LOG.md) — running decision log, updated every session
 - [`docs/RULES.md`](docs/RULES.md) — team working rules; **read before your first push** (AI-generated backend code must be prechecked by Ayaan)
+- [`docs/DATASET.md`](docs/DATASET.md) — IO-VNBD V-*/S-* column reference, terminology (`reference_trajectory` not `ground_truth`), chosen MVP sequence, timestamp canonicalization rule
 - [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) — git workflow for collaborators
 - [`requirements.txt`](requirements.txt) — backend Python dependencies
 

@@ -14,7 +14,7 @@ Ayaan owns ~90% of the backend and holds the full context on the processing pipe
 - Frontend PRs can be merged once Aryan and one other person have looked, but must not change any backend file or the agreed JSON schema without backend sign-off.
 
 ## Rule 3 — The JSON schema is frozen once agreed, and only changed by agreement
-The frontend and backend meet at the exported JSON files (`ground_truth.json`, `gnss_only.json`, `fused_output.json`). Once the schema is agreed (end of backend Part III):
+The frontend and backend meet at the exported JSON files (`reference_trajectory.json`, `gnss_only.json`, `fused_output.json` — see docs/DATASET.md for schema). Once the schema is agreed (end of backend Part III):
 - Neither side changes a field name, unit, or structure unilaterally.
 - Any schema change is announced to both tracks and reflected in ARCHITECTURE.md in the same change.
 - This is the single most likely place the two parallel tracks break each other — treat it as a contract.

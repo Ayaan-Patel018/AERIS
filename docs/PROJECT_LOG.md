@@ -46,6 +46,25 @@ Timestamped, append-only. One entry per working session: what changed, what was 
 
 ---
 
+## 2026-08-29 (later still) — Dataset locked, terminology fixed, GPT review incorporated
+**Did:**
+- Read the actual IO-VNBD paper (README_1.pdf, now in repo root). Confirmed full V-* (29 cols, VBOX) and S-* (24 cols, AndroSensor) column schemas with units.
+- **Naming fix (GPT's catch, correct call):** renamed `ground_truth.json` → `reference_trajectory.json` everywhere in the docs. VBOX GPS is a dedicated logger, not RTK — "reference" is honest, "ground truth" overclaims precision we don't have.
+- **Locked dataset roles:** `V-*` = reference trajectory (evaluation only), `S-*` = actual pipeline input (this is what a real phone sees — matches the problem statement exactly).
+- **Locked MVP sequence:** `V-S3b`/`S-S3b` (11.4 min, repeated turns + 1 reverse — good NHC demo). Backup: `V-Vta2`/`S-Vta2`.
+- **New rule (mine, added to DATASET.md):** canonicalize timestamps to a `timestamp_s` column immediately at load time, before anything else touches the data — `V-*` and `S-*` use different clocks/units natively.
+- Created `docs/DATASET.md` as the single reference for all of this — column tables, terminology, sequence choice, open items.
+- Noted gravity is provided as separate columns in `S-*` (possible shortcut for bias removal) and flagged the gyroscope axis ambiguity in the paper's own table (Pitch listed twice) as unresolved — needs the real CSV header, not guessing.
+
+**Decided:** Loader work (Part I) does NOT start until the open items in DATASET.md are checked against a real CSV (header presence, gyro axis order, gravity columns non-zero).
+
+**Open:**
+- The 3 open items in docs/DATASET.md (header row, gyro axis mapping, gravity columns) — check before writing the loader
+- Node.js/npm confirmed present; venv + requirements.txt install still to be confirmed working
+- JSON schema still to be frozen (end of Part III, per RULES.md)
+
+---
+
 ## 2026-08-29 (later) — Architecture doc enriched from full design source
 **Did:** Re-read the full 27-part design doc and pulled in everything viable that the condensed version had dropped:
 - Replaced the small pipeline sketch with the full 12-module block diagram (ARCHITECTURE.md), with a note that 100 Hz was the design target but IO-VNBD is ~10 Hz.
