@@ -33,6 +33,19 @@ Tested across 30s, 60s, and 120s simulated outages — results hold across all t
 
 ---
 
+## Validation on a second, unseen sequence
+
+To confirm the results aren't tuned to one sequence, the exact same pipeline (zero parameter changes) was run on **S1** — a different, much longer (86 min vs. 11 min) driving sequence with more varied terrain including motorway segments.
+
+| Sequence | Full system — 60s outage | Notes |
+|---|---|---|
+| S3b (development) | 68.9 m mean / 153.4 m max | 11 min, town driving, repeated turns |
+| **S1 (unseen validation)** | **115.2 m mean / 718.7 m max** | 86 min, includes motorway |
+
+Results generalize — same order of magnitude on an independent sequence, and dramatically better than any single-component alternative on both. One honest finding: NHC-alone degrades more on S1's motorway segments than S3b's town driving (hard lateral-velocity constraint holds less well at higher speed), which is exactly why the full GNSS+NHC system — not NHC alone — is the actual contribution.
+
+---
+
 ## Backend results (plots)
 
 ### 4-mode ablation — 60s outage

@@ -454,10 +454,14 @@ def run_pipeline(
             row["linear_accel_y"],
             row["linear_accel_z"],
         ])
+        # Body frame convention (IO-VNBD Fig.2): X=forward(roll axis),
+        # Y=left(pitch axis), Z=up(yaw axis). CSV columns are named
+        # semantically (Yaw/Pitch/Roll), not by physical axis — must
+        # reorder to [roll_rate, pitch_rate, yaw_rate] = [X, Y, Z].
         gyro = np.array([
-            row["gyro_yaw_rads"],
-            row["gyro_pitch_rads"],
             row["gyro_roll_rads"],
+            row["gyro_pitch_rads"],
+            row["gyro_yaw_rads"],
         ])
 
         # ── INS propagation ───────────────────────────────────────────────
@@ -747,4 +751,7 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig("exports/ablation_comparison.png", dpi=150)
     print("  Saved: exports/ablation_comparison.png")
-    plt.show()
+    if os.environ.get("SHOW_PLOTS") == "1":
+        plt.show()
+    else:
+        plt.close()

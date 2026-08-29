@@ -108,6 +108,34 @@ Timestamped, append-only. One entry per working session: what changed, what was 
 
 ---
 
+## 2026-08-29 (final) — Polish 1+2 done, S1 validation run, real gyro axis bug found and fixed
+**Did:**
+- **Polish 1 (adaptive GNSS noise):** wired the GNSS quality classification into `update_gnss_position()` — noise scales 1x/3x/10x for healthy/degraded/unavailable. Confirmed working, no regression.
+- **Polish 2 (ZUPT):** added `update_zupt()`, triggered when GPS speed < 0.3 m/s for 3+ consecutive rows. `ins_nhc` mean improved slightly (628→605 m on S3b) — free accuracy at stops, confirmed.
+- **Polish 3 (S1 validation, unseen sequence, zero tuning):** ran the exact same pipeline on S1 (86 min, Coventry, much longer/more varied than S3b's 11 min). Results:
+
+| Sequence | Full system, 60s outage: mean / max |
+|---|---|
+| S3b (development) | 68.9 m / 153.4 m |
+| **S1 (unseen validation)** | **115.2 m / 718.7 m** |
+
+Same order of magnitude, not identical (expected/good — identical would look suspicious). This is the "not cherry-picked" evidence for the pitch.
+
+**Honest finding, not a bug:** `ins_nhc` alone degraded much more on S1 (5,040 m) than S3b (605 m) — hard-threshold NHC's lateral-velocity≈0 assumption holds better at town speeds than across S1's longer motorway segments. `full` mode stays consistent on both because GNSS corrects the bias NHC introduces alone at highway speed. This is a genuine finding worth stating in the pitch, not hiding.
+
+**Caution noted (GPT, correct):** never say "100% improvement" — S1's ins_only diverges to 315,455 m, so any real result rounds to 100.0% at one decimal. Always quote the actual mean/max numbers instead of the percentage when the percentage would look fabricated.
+
+- **Polish 4 (yaw/gyro axis bug, found and fixed):** the body-frame gyro vector was built as `[yaw_rate, pitch_rate, roll_rate]` mapped directly to `[X, Y, Z]` — but IO-VNBD's phone axis convention (Fig. 2: X=forward/roll axis, Y=left/pitch axis, Z=up/yaw axis) means the CSV's semantically-named Yaw/Pitch/Roll columns needed reordering to `[roll_rate, pitch_rate, yaw_rate]` = `[X, Y, Z]`. This was silently swapping yaw and roll rotation into the wrong axes during INS propagation — likely the real cause of `ins_only`'s wrong-direction drift. **Fixed the convention, not the result** — re-running to confirm, not to chase a better-looking number (per GPT's correct caution on this exact point).
+
+**Decided:** JSON schema is frozen (Aryan can build against it without waiting). No more schema changes without announcing to both tracks per RULES.md.
+
+**Open:**
+- Confirm gyro axis fix doesn't regress `full` mode numbers (should be neutral/positive, not negative, since GNSS+NHC were already compensating)
+- Frontend: Aryan scaffolding independently against exported JSON
+- Sept 1 onward: freeze, no new features, only bug fixes + rehearsal per the locked Aug29→Sept4 timeline
+
+---
+
 ## 2026-08-29 (later) — Architecture doc enriched from full design source
 **Did:** Re-read the full 27-part design doc and pulled in everything viable that the condensed version had dropped:
 - Replaced the small pipeline sketch with the full 12-module block diagram (ARCHITECTURE.md), with a note that 100 Hz was the design target but IO-VNBD is ~10 Hz.

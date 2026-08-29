@@ -291,7 +291,10 @@ def plot_multi_scenario(all_scenario_results, v_df, outdir_base):
     path = os.path.join(outdir_base, "multi_scenario_comparison.png")
     plt.savefig(path, dpi=150)
     print(f"  Saved: {path}")
-    plt.show()
+    if os.environ.get("SHOW_PLOTS") == "1":
+        plt.show()
+    else:
+        plt.close()
 
 
 def plot_gnss_quality(s_df, statuses, outdir_base):
@@ -323,7 +326,10 @@ def plot_gnss_quality(s_df, statuses, outdir_base):
     path = os.path.join(outdir_base, "gnss_quality.png")
     plt.savefig(path, dpi=150)
     print(f"  Saved: {path}")
-    plt.show()
+    if os.environ.get("SHOW_PLOTS") == "1":
+        plt.show()
+    else:
+        plt.close()
 
 
 # ── main ──────────────────────────────────────────────────────────────────────

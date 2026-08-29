@@ -15,6 +15,7 @@ Usage:
     plot_raw_trajectory(s_df, v_df)
 """
 
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -290,7 +291,16 @@ def plot_raw_trajectory(s_df: pd.DataFrame,
     ax.legend(loc="best")
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.show()
+
+    os.makedirs("exports", exist_ok=True)
+    save_path = os.path.join("exports", "raw_trajectory_check.png")
+    plt.savefig(save_path, dpi=150)
+    print(f"  Saved: {save_path}")
+
+    if os.environ.get("SHOW_PLOTS") == "1":
+        plt.show()
+    else:
+        plt.close()
 
 
 # ── quick test entrypoint ────────────────────────────────────────────────────
