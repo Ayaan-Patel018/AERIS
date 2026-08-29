@@ -73,7 +73,15 @@ timestamp_s   # float seconds, monotonically increasing, starts at 0 for the seq
 ```
 while **keeping the original raw timestamp column too** (for traceability/debugging). Do this in the loader itself — nothing downstream (INS, EKF, JSON export) should ever touch the raw per-file timestamp format directly.
 
-## Open items before writing the loader
-- [ ] Confirm actual CSV files have a header row, or are headerless (changes one line of the loader) — check with `Get-Content` on the real file before assuming either way.
-- [ ] Confirm gyroscope Yaw/Roll/Pitch axis order against the real header or GitHub dev tools — the paper table has a typo (Pitch listed twice) and this cannot be resolved by guessing.
-- [ ] Confirm gravity columns are genuinely present and non-zero in the actual `S-S3b` file (paper describes them, but verify before depending on the subtraction shortcut).
+## Open items — ALL RESOLVED (confirmed against real S-S3b.csv and V-S3b.csv)
+- [x] Header row present in both files — column names can be read directly
+- [x] Gyroscope axis order confirmed: **Yaw, Pitch, Roll** (paper had a typo listing Pitch twice)
+- [x] Gravity columns confirmed populated in S-S3b (e.g. `GRAVITY Z ≈ 9.8066 m/s²`)
+- [x] `GPS SATELLITES IN RANGE` in S-* is a **string** like `"16 / 18"` (visible/in-range) — not a plain integer; parse the first number only
+- [x] V-* timestamp: "Time Since Start of Day (seconds)" — float seconds from midnight
+- [x] S-* timestamp: "TIME SINCE START (ms)" — integer milliseconds from sequence start
+- [x] V-* acceleration: in **g** (e.g. `-0.019 g`) — must convert to m/s² at load time
+- [x] S-* acceleration: already in **m/s²** — no conversion needed
+
+## Known discrepancy (non-blocking, investigate when convenient)
+`V-S3b`'s first column (paper calls it "No of GPS Satellites Available") produces implausible values when loaded (mean=97.7, max=137 — impossible for real satellite counts). Likely the actual VBOX CSV column order doesn't exactly match the paper's Table 3. **Not renamed to `gps_satellites`** in the loader — kept as `vbox_col1_raw` and unused downstream, so it doesn't propagate bad data into the EKF. Confirm real column identity with `Get-Content ... -First 1` on the raw file when there's spare time; not required for Part II.

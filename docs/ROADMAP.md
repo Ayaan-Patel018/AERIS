@@ -8,6 +8,8 @@ Ordered so the highest-silent-failure-risk component (EKF stability) gets valida
 Crux = EKF + NHC producing a believable position through a simulated GNSS outage. One AI component (GNSS quality detector). No deep-learning training, no Android build, map matching optional (nearest-road only if at all).
 
 **Day 1 (Aug 29)** — Backend: Part I (load/understand IO-VNBD at its real 10 Hz rate) + Part II (minimal INS + ES-EKF, GNSS-only fusion, confirm no divergence). Frontend: scaffold Vite+React+Tailwind+Leaflet+Recharts, mock replay with dummy JSON.
+> **Part I status: DONE.** Loader confirmed working on S-S3b/V-S3b — both 681s, 10 Hz, matching row counts. See PROJECT_LOG.md for the full confirmation and the one open non-blocking item (`vbox_col1_raw`).
+> **Part II spec locked** (see ARCHITECTURE.md "Part II design — LOCKED"): local ENU conversion, nominal quaternion + separate 15-dim error state, GPS-displacement-window yaw init, GNSS-outage-as-input-flag from day one, basic hard-threshold NHC (adaptive gating deferred), 4-mode ablation (pure INS / INS+GNSS / INS+NHC / full) built in from the start.
 **Day 2 (Aug 30)** — Backend: Part III (NHC + outage simulation, export the 3 JSON files) + Part V (GNSS quality detector, scikit-learn or rule-based). Frontend: swap in real JSON, add outage banner + status badge + uncertainty circle + metrics panel.
 **Day 3 (Aug 31)** — Integration, polish, error/velocity charts, responsive pass, deploy to Vercel, test on phone + laptop, record fallback video.
 **Sept 1–3** — Buffer for slippage + rehearsal (the sprint is scoped for 3 days but the deadline is the 4th, so these are genuine safety days — don't treat them as extra scope).

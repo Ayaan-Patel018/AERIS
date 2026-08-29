@@ -169,6 +169,39 @@ Condensed from the full failure analysis. Detection + mitigation in one line eac
 ## Seamless mode switching (the demo's smoothness depends on this)
 The EKF has no explicit "modes." It simply uses whatever measurements are available each step. When GNSS is lost, its measurement weight drops to zero and covariance grows smoothly (no reset → no visible jump). When GNSS returns, the correction pulls the estimate back gradually, weighted by relative uncertainty — strong but continuous. **Never snap position to a fresh GNSS fix; let the filter blend.** This is what makes the tunnel entry/exit look seamless instead of teleporting.
 
+## Part II design — LOCKED (ins_ekf.py)
+Finalized after GPT review; this is the actual implementation spec, not just the conceptual pipeline above.
+
+**Coordinate frame:** GPS lat/lon converted to **local ENU (meters)** immediately at the EKF boundary. Lat/lon is kept only for input parsing and final output/visualization — the filter itself never touches degrees.
+
+**State separation (important, not optional):**
+- **Nominal state:** `p (position), v (velocity), q (attitude, quaternion), ba (accel bias), bg (gyro bias)` — propagated nonlinearly by the INS.
+- **Error state (15-dim, what the EKF actually estimates):** `δp(3), δv(3), δθ(3), δba(3), δbg(3)`.
+- Attitude error is a small-angle rotation vector `δθ` correcting the nominal quaternion — never store/propagate attitude as raw Euler angles in the filter. This avoids gimbal-lock/singularity issues and is the technically correct way to do ES-EKF.
+
+**Alignment (fixed for the sequence, not re-estimated mid-drive):**
+- Roll/pitch from gravity direction (accelerometer, stationary/near-stationary window).
+- Yaw from a **short initial GPS displacement window** (t0→tN positions), not a single heading sample — much more reliable.
+- If the vehicle is stationary or barely moving at startup, flag yaw as unobservable rather than manufacture a bad heading from noise.
+
+**GNSS outage — first-class input, not a post-hoc hack:** the filter loop takes IMU every step and a GNSS-available/unavailable flag every step. This makes outage simulation a matter of toggling the flag for a window, not a separate code path bolted on later.
+
+**NHC — basic first, adaptive gating as a stretch goal:**
+- MVP: hard-threshold pseudo-measurement, lateral/vertical velocity ≈ 0 in vehicle frame, fixed small covariance. Get this visibly reducing drift on S-S3b's turns before anything fancier.
+- Should-have (only if time remains after the 4-mode ablation works): Mahalanobis/residual gating so NHC weakens or rejects during abnormal maneuvers instead of always hard-applying. Do not let this block Part II completion.
+
+**Built-in 4-mode ablation (this is the free comparison graph, build it in from day one):**
+| Mode | What it runs |
+|---|---|
+| 1 | Pure INS propagation (no corrections at all) |
+| 2 | INS + GNSS updates only |
+| 3 | INS + NHC only (no GNSS) |
+| 4 | Full ES-EKF: INS + GNSS + NHC |
+
+Running all 4 on the same S-S3b sequence, across GNSS-outage scenarios (always-available / 30s outage / 60s outage / 120s outage), gives the position-error-vs-time comparison chart that's the single most persuasive SIH figure — each mode should visibly show why the next component matters.
+
+**Confirmed not to add for MVP** (unchanged from anti-overengineering list, reconfirmed): online sensor-axis calibration, complex vehicle dynamics models, map matching, particle filters, deep-learning INS correction, sophisticated adaptive covariance estimation, online magnetic heading, elaborate Earth models.
+
 ## Presentation Website (MVP) — Tech Stack
 
 | Layer | Choice |
@@ -178,7 +211,7 @@ The EKF has no explicit "modes." It simply uses whatever measurements are availa
 | Styling | Tailwind CSS |
 | Map | Leaflet.js + react-leaflet, OpenStreetMap tiles (same OSM source as the map-matching module) |
 | Charts | Recharts (position error vs. time, velocity comparison) |
-| Data | Static JSON exported from the Python EKF/INS pipeline: `ground_truth.json`, `gnss_only.json`, `classical_ins.json`, `ai_enhanced.json`, `map_matched.json` |
+| Data | Static JSON exported from the Python EKF/INS pipeline: `reference_trajectory.json`, `gnss_only.json`, `fused_output.json` (see docs/DATASET.md for exact schema and dataset-format details) |
 | "Live" feel | `requestAnimationFrame` stepping through timestamped points — no real backend needed |
 | Hosting | Vercel, auto-deploy from the repo |
 | Folder | `/frontend` at repo root (matches AI-Dubbing-Engine convention) |

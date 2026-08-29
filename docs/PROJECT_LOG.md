@@ -65,6 +65,23 @@ Timestamped, append-only. One entry per working session: what changed, what was 
 
 ---
 
+## 2026-08-29 (later still) — Part I confirmed working; Part II design locked
+**Did:**
+- Wrote `backend/data_loader.py` against the real confirmed CSV structure (not the paper's description). Fixed two real bugs found by running it: (1) CSV encoding is Latin-1, not UTF-8 — both files' special characters (m/s², °, μT) were failing to parse; (2) S-* raw timestamp counter resets/wraps mid-sequence — fixed by building `timestamp_s` from cumulative forward-only deltas instead of simple subtraction.
+- **Part I confirmed done:** both S-S3b and V-S3b load cleanly, 681 s duration, 10 Hz, 6813 matching rows, GPS 100% available, IMU stats sane. Raw trajectory plot overlays both traces correctly — the repeated left/right turns pattern (the reason we picked this sequence) is clearly visible.
+- One open, non-blocking item logged in DATASET.md: `V-S3b`'s first column produces implausible "satellite count" values (max 137) — likely a column-order mismatch vs. the paper. Isolated as `vbox_col1_raw`, unused downstream, doesn't block anything.
+- **Part II (INS+EKF) design fully locked** after GPT review — recorded in detail in ARCHITECTURE.md "Part II design — LOCKED". Key upgrades over the original plan: nominal quaternion state kept separate from the 15-dim error state (avoids Euler singularities — this is the technically correct ES-EKF, not just "an EKF with 15 numbers"); yaw initialized from a short GPS displacement window instead of one heading sample, with an explicit unobservable-yaw flag if the vehicle starts stationary; GNSS outage modeled as a first-class per-step availability flag from day one, not bolted on later; a 4-mode ablation (pure INS / INS+GNSS / INS+NHC / full EKF) built into `ins_ekf.py` from the start — this gives the position-error-vs-time comparison chart "for free," which is the single most persuasive SIH figure.
+- **Scope call (mine, not blocking):** NHC ships as basic hard-threshold first; Mahalanobis/residual adaptive gating is a should-have added only after the 4-mode ablation works end to end, so it can't quietly eat a day we don't have.
+
+**Decided:** `ins_ekf.py` is next. Local ENU conversion, nominal+error state separation, and the 4-mode ablation are all mandatory parts of the first implementation, not later additions.
+
+**Open:**
+- `vbox_col1_raw` real identity (non-blocking)
+- Confirm whether S-S3b's vehicle is stationary at t=0 (affects whether yaw-init needs the unobservable-flag path)
+- JSON schema still to be frozen at end of Part III
+
+---
+
 ## 2026-08-29 (later) — Architecture doc enriched from full design source
 **Did:** Re-read the full 27-part design doc and pulled in everything viable that the condensed version had dropped:
 - Replaced the small pipeline sketch with the full 12-module block diagram (ARCHITECTURE.md), with a note that 100 Hz was the design target but IO-VNBD is ~10 Hz.
