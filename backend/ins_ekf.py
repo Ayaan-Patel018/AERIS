@@ -303,12 +303,16 @@ class ESEKF:
         self.P  = I_KH @ self.P @ I_KH.T + K @ R_noise @ K.T  # Joseph form
 
     def update_gnss_position(self, state: NominalState,
-                             gps_enu: np.ndarray) -> None:
-        """GNSS position update — 3 measurements (ENU)."""
+                             gps_enu: np.ndarray,
+                             quality: str = "healthy") -> None:
+        """GNSS position update — noise scales with quality classification."""
+        # Polish 1: adaptive noise based on GNSS classifier output
+        noise_scale = {"healthy": 1.0, "degraded": 3.0, "unavailable": 10.0}
+        scale = noise_scale.get(quality, 1.0)
         H = np.zeros((3, self.n))
         H[0:3, 0:3] = np.eye(3)
-        R = np.eye(3) * SIGMA_GNSS_POS**2
-        z = gps_enu - state.p       # innovation
+        R = np.eye(3) * (SIGMA_GNSS_POS * scale)**2
+        z = gps_enu - state.p
         self._update(H, R, z)
 
     def update_gnss_velocity(self, state: NominalState,
@@ -343,6 +347,20 @@ class ESEKF:
 
         R_noise = np.diag([SIGMA_NHC_LAT**2, SIGMA_NHC_VERT**2])
         self._update(H, R_noise, z_nhc)
+
+    def update_zupt(self, state: NominalState) -> None:
+        """
+        Zero-Velocity Update (ZUPT) — Polish 2.
+        When the vehicle is stationary, velocity must be zero.
+        Applies a zero-velocity pseudo-measurement to all 3 velocity components.
+        This corrects velocity drift for free at every traffic stop.
+        """
+        SIGMA_ZUPT = 0.05   # m/s — tight constraint, vehicle really is stopped
+        H = np.zeros((3, self.n))
+        H[0:3, 3:6] = np.eye(3)
+        R = np.eye(3) * SIGMA_ZUPT**2
+        z = -state.v        # innovation: measured vel = 0, predicted = state.v
+        self._update(H, R, z)
 
     def inject_corrections(self, state: NominalState) -> NominalState:
         """
@@ -458,12 +476,37 @@ def run_pipeline(
         if gnss_available:
             gnss_flag = "outage" if in_outage else "healthy"
 
+        # ── Polish 1: GNSS quality classification ─────────────────────────
+        # Compute per-step quality before the EKF update
+        gps_quality = "unavailable"
+        if gnss_available:
+            sats     = row.get("gps_satellites", 15)
+            acc      = row.get("gps_accuracy_m", 3.0)
+            # Simple inline classification (mirrors GNSSQualityClassifier)
+            if np.isnan(sats) or sats < 6:
+                gps_quality = "unavailable"
+                gnss_available = False
+            elif sats < 8 or (not np.isnan(acc) and acc > 10.0):
+                gps_quality = "degraded"
+                gnss_flag   = "degraded"
+            else:
+                gps_quality = "healthy"
+                gnss_flag   = "healthy"
+
+        # ── Polish 2: ZUPT — detect stationary vehicle ────────────────────
+        # Check last 3 rows for near-zero GPS speed
+        zupt_active = False
+        if cfg["use_nhc"] and i >= 3:
+            recent_speeds = s_df["gps_speed_ms"].iloc[i-3:i+1]
+            if (recent_speeds < 0.3).all() and not recent_speeds.isna().any():
+                zupt_active = True
+
         # ── GNSS update ───────────────────────────────────────────────────
         if gnss_available:
             gps_enu = latlon_to_enu(
                 row["gps_lat"], row["gps_lon"], lat0, lon0
             )
-            ekf.update_gnss_position(state, gps_enu)
+            ekf.update_gnss_position(state, gps_enu, quality=gps_quality)
 
             if not np.isnan(row["gps_speed_ms"]) and not np.isnan(row["gps_heading_deg"]):
                 gps_vel = gps_to_enu_velocity(
@@ -474,6 +517,10 @@ def run_pipeline(
         # ── NHC update ────────────────────────────────────────────────────
         if cfg["use_nhc"]:
             ekf.update_nhc(state)
+
+        # ── ZUPT update (Polish 2) ────────────────────────────────────────
+        if zupt_active:
+            ekf.update_zupt(state)
 
         # ── inject corrections ─────────────────────────────────────────────
         state = ekf.inject_corrections(state)
