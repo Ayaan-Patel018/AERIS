@@ -115,49 +115,73 @@ def skew(v):
 
 
 # ── initial alignment ─────────────────────────────────────────────────────────
-def initial_alignment(s_df, init_seconds=2.0):
+def initial_alignment(s_df, v_df=None, init_seconds=5.0):
     """
-    Estimate initial attitude from:
-      - Gravity direction (accelerometer mean over init window) → roll, pitch.
-      - GPS displacement vector over init window → yaw.
-        If the vehicle is barely moving, yaw is flagged as unobservable.
+    Estimate initial attitude:
+      - Roll/pitch from gravity direction (accelerometer mean over init window).
+      - Yaw from VBOX heading if available (most reliable),
+        else from GPS displacement window,
+        else flagged unobservable.
 
-    Returns: q0 (quaternion), yaw_observable (bool)
+    Yaw convention: degrees clockwise from North (standard navigation).
+    ENU frame: East=x, North=y, Up=z.
+    arctan2(East, North) gives bearing clockwise from North — confirmed correct.
+
+    Returns: q0 (quaternion [w,x,y,z]), yaw_observable (bool)
     """
     dt_mask = s_df["timestamp_s"] < init_seconds
     window  = s_df[dt_mask]
-
     if len(window) < 3:
-        window = s_df.iloc[:10]  # fallback: use first 10 rows
+        window = s_df.iloc[:10]
 
-    # Roll and pitch from gravity (accelerometer ≈ gravity when near-stationary)
+    # ── Roll and pitch from gravity ───────────────────────────────────────
+    # Phone sensor axis (Figure 2, IO-VNBD paper):
+    #   x = direction of travel (forward), y = left, z = up (screen out)
+    # Gravity in phone frame when roughly level: mainly z-axis
     gx = window["gravity_x"].mean()
     gy = window["gravity_y"].mean()
     gz = window["gravity_z"].mean()
-    g_vec = np.array([gx, gy, gz])
-    g_norm = np.linalg.norm(g_vec)
-
+    g_norm = np.sqrt(gx**2 + gy**2 + gz**2)
     if g_norm < 1.0:
-        g_vec = np.array([0., 0., G_MS2])  # fallback if gravity data is bad
+        gx, gy, gz = 0., 0., G_MS2
 
-    roll  = np.arctan2(gy, gz) * RAD2DEG
-    pitch = np.arctan2(-gx, np.sqrt(gy**2 + gz**2)) * RAD2DEG
+    # Standard strapdown gravity-based tilt:
+    roll  =  np.arctan2(gy, gz) * RAD2DEG
+    pitch = -np.arctan2(gx, np.sqrt(gy**2 + gz**2)) * RAD2DEG
 
-    # Yaw from GPS displacement window
-    gps_window = s_df[s_df["timestamp_s"] < 5.0].dropna(subset=["gps_lat", "gps_lon"])
+    # ── Yaw: prefer VBOX heading (most reliable source) ──────────────────
     yaw_observable = False
     yaw = 0.0
 
-    if len(gps_window) >= 2:
-        lat0, lon0 = gps_window["gps_lat"].iloc[0], gps_window["gps_lon"].iloc[0]
-        lat1, lon1 = gps_window["gps_lat"].iloc[-1], gps_window["gps_lon"].iloc[-1]
-        enu_disp = latlon_to_enu(lat1, lon1, lat0, lon0)
-        disp_mag = np.linalg.norm(enu_disp[:2])  # horizontal displacement
+    if v_df is not None:
+        # VBOX heading is a dedicated GPS compass — far more reliable than
+        # our displacement calculation. Use mean of first init_seconds.
+        v_window = v_df[v_df["timestamp_s"] < init_seconds]
+        v_window = v_window[v_window["gps_heading_deg"].notna()]
+        if len(v_window) >= 3:
+            # Check vehicle is actually moving (heading is meaningless at rest)
+            moving = v_window["gps_speed_ms"] > 0.5   # > 0.5 m/s (~2 km/h)
+            if moving.sum() >= 2:
+                yaw = v_window.loc[moving, "gps_heading_deg"].mean()
+                yaw_observable = True
 
-        if disp_mag > 1.0:  # at least 1 metre of displacement to trust heading
-            yaw = np.arctan2(enu_disp[0], enu_disp[1]) * RAD2DEG
-            yaw_observable = True
-        # else: yaw stays 0.0, flagged unobservable
+    if not yaw_observable:
+        # Fallback: GPS displacement window from smartphone
+        gps_window = s_df[s_df["timestamp_s"] < 10.0].dropna(
+            subset=["gps_lat", "gps_lon"]
+        )
+        if len(gps_window) >= 4:
+            lat0 = gps_window["gps_lat"].iloc[0]
+            lon0 = gps_window["gps_lon"].iloc[0]
+            lat1 = gps_window["gps_lat"].iloc[-1]
+            lon1 = gps_window["gps_lon"].iloc[-1]
+            enu  = latlon_to_enu(lat1, lon1, lat0, lon0)
+            disp = np.linalg.norm(enu[:2])
+            if disp > 2.0:
+                # arctan2(East, North) = bearing clockwise from North ✓
+                yaw = np.arctan2(enu[0], enu[1]) * RAD2DEG
+                yaw_observable = True
+        # If still not observable, yaw=0 and flagged — EKF will correct via GPS
 
     q0 = euler_to_quat(roll, pitch, yaw)
     return quat_normalize(q0), yaw_observable
@@ -385,7 +409,7 @@ def run_pipeline(
     lat0, lon0 = first_gps["gps_lat"], first_gps["gps_lon"]
 
     # ── initial alignment ─────────────────────────────────────────────────
-    q0, yaw_obs = initial_alignment(s_df)
+    q0, yaw_obs = initial_alignment(s_df, v_df=v_df)
     state = NominalState(q=q0)
 
     dt_nominal = 0.1   # 10 Hz
