@@ -1,5 +1,4 @@
 import React, { useEffect, useRef } from 'react';
-import { CTAButton } from '../shared/CTAButton';
 import homeVideo from '../../assets/home-video.mp4';
 
 export const Hero: React.FC = () => {
