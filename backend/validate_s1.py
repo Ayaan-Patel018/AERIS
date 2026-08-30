@@ -6,19 +6,28 @@ This proves we're not cherry-picked/tuned to S3b.
 DO NOT tune any parameters based on S1 results.
 """
 
-import os, sys, json
+import sys
+import os
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(__file__))
-from data_loader import load_smartphone, load_vehicle
+from data_loader import load_smartphone, load_vehicle, get_dataset_root
 from ins_ekf import (run_all_modes, evaluate_error,
                      extract_reference, extract_gnss_only)
 
 # ── S1 paths ──────────────────────────────────────────────────────────────────
+dataset_root = get_dataset_root()
 BASE = os.path.join(
-    os.path.dirname(__file__), "..",
-    "IO-VNBD", "Synchronised V abd S datasets",
+    dataset_root, "Synchronised V abd S datasets",
     "Categorised IOVNB Dataset", "S (Driver A)", "S1"
 )
 S_PATH = os.path.join(BASE, "S-S1.csv")

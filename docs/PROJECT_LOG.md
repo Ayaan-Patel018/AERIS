@@ -144,3 +144,60 @@ Same order of magnitude, not identical (expected/good — identical would look s
 - Added the 15-concept learning list to PROJECT_BRIEF.md for the backend lead.
 **Decided:** ARCHITECTURE.md is now the single richest reference; the original DeepSeek doc is archival only.
 **Open:** unchanged from prior entry (Node.js check, JSON schema freeze, demo sequence pick).
+
+---
+
+## 2026-08-30 — Backend test suite built and confirmed passing (161 tests)
+**Did:**
+- Built a full test suite in `backend/tests/` (6 files, 161 tests, zero new pip dependencies).
+- Layer 1 (unit, no dataset needed): math utilities, INS propagation, ES-EKF mechanics, GNSS classifier, data loader helpers — 92 tests, all pass, ~0.6s.
+- Layer 2 (integration, requires IO-VNBD): loader integration, full pipeline smoke, 4-mode ablation ordering, 3 outage durations, export_json + evaluate_error correctness — 37 tests (skip gracefully when dataset absent, confirmed would run on the machine with data).
+- Layer 3 (JSON schema, runs on existing exports): all 3 root export files + eval/outage_60s + evaluation_summary.json validated — 32 tests, all pass.
+- Confirmed all passing: exit code 0, 161 executed, 37 skipped (dataset not on CI machine).
+- Entry point: `python run_tests.py` (with `--unit-only`, `--verbose`, `--failfast` flags).
+
+**Key test design decisions:**
+- Pure `unittest`, no pytest — avoids new requirements.txt entries.
+- Synthetic DataFrames in `conftest.py` — Layer 1 runs anywhere with no data.
+- Integration tests use `@unittest.skipUnless(DATASET_AVAILABLE, ...)` — exit 0 on CI without dataset.
+- Every test has a one-line docstring saying what *property* it proves, not just "does it run".
+- Each test file has `# EXTENSION POINT` comment for where next module's tests go (AI velocity, map matching).
+
+**Open:**
+- Frontend scaffold still pending (Part IV — next session).
+
+---
+
+## 2026-08-30 — EKF core audit, 3 bug fixes, IO-VNBD downloaded, all exports regenerated
+
+**Did:**
+- **Downloaded IO-VNBD dataset** via `git clone --depth 1` to `../IO-VNBD/` (731 files). Fixed all 4 backend scripts (`data_loader.py`, `ins_ekf.py`, `outage_analysis.py`, `validate_s1.py`) to use a robust `get_dataset_root()` function that searches multiple candidate directories.
+- **EKF core audit** — read every line of `ins_ekf.py` (758 lines) and found 3 real bugs:
+  1. **Q matrix not scaled per step** — process noise was baked at `dt=0.1` in constructor, but actual dt varies. Now recomputed each `predict()` call.
+  2. **Missing F[6:9,6:9] attitude self-propagation** — attitude error state wasn't rotating with the vehicle. Added `I - skew(w_corr)·dt`.
+  3. **Dead outage flag branch** — `gnss_flag = "outage"` was unreachable. Fixed so JSON exports correctly distinguish "outage" from "unavailable".
+- **Regenerated all exports** with fixed EKF:
+  - `ins_ekf.py` → root JSONs + ablation PNG
+  - `outage_analysis.py` → 3 scenario JSONs + evaluation_summary.json + plots
+  - `validate_s1.py` → S1 validation summary + plot (fixed missing `import json`)
+- **Fixed Windows UTF-8** encoding in `outage_analysis.py` and `validate_s1.py`.
+- **Updated README** with accurate numbers from fresh runs.
+- **161/161 tests pass**, 0 skips (IO-VNBD now on disk), 64 seconds.
+
+**Updated numbers (post-fix EKF):**
+
+| Metric | S3b (60s outage) | S1 (60s outage) |
+|---|---|---|
+| Full system mean | 85.8 m | 166.5 m |
+| Full system max | 179.3 m | 789.2 m |
+| INS-only mean | 12,602 m | 302,125 m |
+| vs INS-only improvement | 99.3% | 99.9% |
+
+**Decided:**
+- Numbers are slightly higher than pre-fix (85.8 m vs 65.7 m at 60s) because the fixed Q scaling and attitude propagation changed the filter dynamics. This is the *correct* answer — the old numbers were computed with a subtly wrong filter.
+- The "improvement vs GNSS-only" story is clearest at 120s outage (85.9% for S3b, where INS+GNSS collapses to 696 m while full holds at 98 m). At 30–60s, INS+GNSS is competitive because GPS hasn't been gone long enough to drift badly.
+
+**Open:**
+- Frontend scaffold (Part IV) — this is the highest-impact remaining work. Judges need to SEE the vehicle on a map.
+- ML GNSS quality classifier — would make "Intelligent" literally true (currently rule-based).
+

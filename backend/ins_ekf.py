@@ -278,6 +278,7 @@ class ESEKF:
         dt = self.dt
         R  = quat_to_rot(state.q)
         a_corr = accel_body - state.ba
+        w_corr = gyro_body  - state.bg
 
         # State transition matrix F (15×15)
         F = np.eye(self.n)
@@ -287,10 +288,26 @@ class ESEKF:
         F[3:6, 6:9]   = -R @ skew(a_corr) * dt
         # δv ← δba
         F[3:6, 9:12]  = -R * dt
+        # δθ ← δθ  (attitude error self-propagation under rotation)
+        F[6:9, 6:9]   = np.eye(3) - skew(w_corr) * dt
         # δθ ← δbg
         F[6:9, 12:15] = -np.eye(3) * dt
 
-        self.P  = F @ self.P @ F.T + self.Q
+        # Fix 1: Q must scale with actual dt, not constructor dt
+        # (IO-VNBD has ~10 Hz with occasional gaps — Q must reflect real interval)
+        q_a  = (SIGMA_ACCEL_NOISE  * dt)**2
+        q_g  = (SIGMA_GYRO_NOISE   * dt)**2
+        q_ba = (SIGMA_ACCEL_BIAS   * dt)**2
+        q_bg = (SIGMA_GYRO_BIAS    * dt)**2
+        Q_dt = np.diag([
+            q_a,  q_a,  q_a,
+            q_a,  q_a,  q_a,
+            q_g,  q_g,  q_g,
+            q_ba, q_ba, q_ba,
+            q_bg, q_bg, q_bg,
+        ])
+
+        self.P  = F @ self.P @ F.T + Q_dt
         self.dx = F @ self.dx
 
     def _update(self, H: np.ndarray, R_noise: np.ndarray,
@@ -477,8 +494,8 @@ def run_pipeline(
                           and not np.isnan(row["gps_lat"]))
 
         gnss_flag = "unavailable"
-        if gnss_available:
-            gnss_flag = "outage" if in_outage else "healthy"
+        if in_outage:
+            gnss_flag = "outage"   # Fix 2: outage is distinct from no-signal
 
         # ── Polish 1: GNSS quality classification ─────────────────────────
         # Compute per-step quality before the EKF update
@@ -490,6 +507,7 @@ def run_pipeline(
             if np.isnan(sats) or sats < 6:
                 gps_quality = "unavailable"
                 gnss_available = False
+                gnss_flag = "unavailable"
             elif sats < 8 or (not np.isnan(acc) and acc > 10.0):
                 gps_quality = "degraded"
                 gnss_flag   = "degraded"
@@ -676,12 +694,12 @@ def evaluate_error(result: dict, v_df) -> dict:
 if __name__ == "__main__":
     import sys
     sys.path.insert(0, os.path.dirname(__file__))
-    from data_loader import load_smartphone, load_vehicle
+    from data_loader import load_smartphone, load_vehicle, get_dataset_root
     import matplotlib.pyplot as plt
 
+    dataset_root = get_dataset_root()
     BASE = os.path.join(
-        os.path.dirname(__file__), "..",
-        "IO-VNBD", "Synchronised V abd S datasets",
+        dataset_root, "Synchronised V abd S datasets",
         "Categorised IOVNB Dataset", "S (Driver A)", "S3b"
     )
 
