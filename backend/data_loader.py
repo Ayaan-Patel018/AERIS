@@ -303,14 +303,25 @@ def plot_raw_trajectory(s_df: pd.DataFrame,
         plt.close()
 
 
+# ── dataset path helper ──────────────────────────────────────────────────────
+def get_dataset_root():
+    candidates = [
+        os.path.join(os.path.dirname(__file__), "..", "..", "IO-VNBD"),
+        os.path.join(os.path.dirname(__file__), "..", "IO-VNBD"),
+        os.path.join(os.path.dirname(__file__), "IO-VNBD"),
+    ]
+    for c in candidates:
+        if os.path.isdir(c):
+            return os.path.abspath(c)
+    return os.path.abspath(candidates[0])
+
 # ── quick test entrypoint ────────────────────────────────────────────────────
 if __name__ == "__main__":
     import sys, os
 
-    # Default paths — adjust if your IO-VNBD folder is elsewhere
+    dataset_root = get_dataset_root()
     BASE = os.path.join(
-        os.path.dirname(__file__), "..",
-        "IO-VNBD", "Synchronised V abd S datasets",
+        dataset_root, "Synchronised V abd S datasets",
         "Categorised IOVNB Dataset", "S (Driver A)", "S3b"
     )
     S_PATH = os.path.join(BASE, "S-S3b.csv")

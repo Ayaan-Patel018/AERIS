@@ -14,20 +14,28 @@ Usage:
     python outage_analysis.py
 """
 
-import os, sys, json
+import sys
+import os
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(__file__))
-from data_loader import load_smartphone, load_vehicle
+from data_loader import load_smartphone, load_vehicle, get_dataset_root
 from ins_ekf     import (run_pipeline, run_all_modes, export_json,
                           extract_reference, extract_gnss_only,
                           evaluate_error, latlon_to_enu)
 
 # ── dataset paths ─────────────────────────────────────────────────────────────
+dataset_root = get_dataset_root()
 BASE = os.path.join(
-    os.path.dirname(__file__), "..",
-    "IO-VNBD", "Synchronised V abd S datasets",
+    dataset_root, "Synchronised V abd S datasets",
     "Categorised IOVNB Dataset", "S (Driver A)", "S3b"
 )
 S_PATH = os.path.join(BASE, "S-S3b.csv")

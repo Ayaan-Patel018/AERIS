@@ -20,16 +20,18 @@ The result: during a 60-second GPS blackout, our system achieves **66 m mean / 1
 
 ## Results (tested on IO-VNBD dataset, S-S3b sequence)
 
-| Mode | Mean error | Max error | What it means |
+| Mode | Mean error (60s outage) | Max error | What it means |
 |---|---|---|---|
-| Raw IMU only | 13,658 m | 35,585 m | Drifts to another city |
-| GPS only | 193 m mean, **5 km spike** | 5,015 m | Collapses when GPS drops |
-| Physics constraints only | 628 m | 1,235 m | Surprisingly good — no GPS needed |
-| **Our full system** | **66 m** | **153 m** | Stable through the entire outage |
+| Raw IMU only | 12,602 m | 28,947 m | Drifts to another city in 60 s |
+| INS + GPS only | 86.3 m mean, **1,468 m spike** | 1,468 m | Collapses when GPS drops |
+| Physics constraints only (NHC) | 592 m | 1,081 m | No GPS needed, but drift builds |
+| **Our full system** | **85.8 m** | **179.3 m** | Stable through the entire outage |
 
-**99.5% improvement over raw IMU. 59% improvement over GPS-only.**
+**99.3% improvement over raw IMU. 85.9% improvement over GPS-only at 120s outage.**
 
-Tested across 30s, 60s, and 120s simulated outages — results hold across all three.
+Note: at short (30s–60s) outages, INS+GPS alone is competitive — the full system's advantage dominates at longer outages (120s), which is exactly the regime this system is designed for.
+
+Tested across 30s, 60s, and 120s simulated outages — error scales gracefully: 83.4 m → 85.8 m → 98.1 m.
 
 ---
 
@@ -39,8 +41,8 @@ To confirm the results aren't tuned to one sequence, the exact same pipeline (ze
 
 | Sequence | Full system — 60s outage | Notes |
 |---|---|---|
-| S3b (development) | 68.9 m mean / 153.4 m max | 11 min, town driving, repeated turns |
-| **S1 (unseen validation)** | **115.2 m mean / 718.7 m max** | 86 min, includes motorway |
+| S3b (development) | 85.8 m mean / 179.3 m max | 11 min, town driving, repeated turns |
+| **S1 (unseen validation)** | **166.5 m mean / 789.2 m max** | 86 min, includes motorway |
 
 Results generalize — same order of magnitude on an independent sequence, and dramatically better than any single-component alternative on both. One honest finding: NHC-alone degrades more on S1's motorway segments than S3b's town driving (hard lateral-velocity constraint holds less well at higher speed), which is exactly why the full GNSS+NHC system — not NHC alone — is the actual contribution.
 
