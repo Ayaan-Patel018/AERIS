@@ -1,0 +1,19 @@
+# Backend Python dependencies for the SIH 26168 navigation MVP.
+# Install into a virtual environment:
+#   python -m venv nav-env
+#   nav-env\Scripts\activate      (Windows PowerShell)
+#   pip install -r requirements.txt
+#
+# Keep this file updated whenever a new backend dependency is added
+# (see VVIP note in docs/PROJECT_LOG.md — the doc set is updated over time).
+
+numpy>=1.26
+pandas>=2.0
+scipy>=1.11
+scikit-learn>=1.3
+matplotlib>=3.8        # optional: raw-trajectory sanity plots during Part I
+# Serving layer — only if a live API is used instead of static JSON export.
+# For the MVP we export static JSON, so these are optional:
+flask>=3.0             # optional
+# fastapi>=0.110       # alternative to flask, uncomment if used
+# uvicorn>=0.29        # ASGI server for fastapi, uncomment if used
