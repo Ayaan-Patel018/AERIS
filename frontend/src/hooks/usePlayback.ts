@@ -1,7 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { useDashboardContext } from '../context/DashboardContext';
+import { TOTAL_DURATION } from './useGNSSStatus';
 
-const TOTAL_DURATION_SEC = 60;
+// Was hardcoded to 60 (seconds), but our real S3b sequence is 681.1s
+// (11:21) — that mismatch made 1x playback race through the data ~11x
+// faster than real time, causing visible jumping/spinning through sharp
+// turns. Now imports the same real duration constant useGNSSStatus.ts
+// already exports, so 1x = actual real-time correspondence to the data.
+// Use the `speed` control to play faster for a shorter demo loop —
+// that's what it's for, rather than baking artificial compression in here.
+const TOTAL_DURATION_SEC = TOTAL_DURATION;
 
 export const usePlayback = () => {
   const { isPlaying, setIsPlaying, progress, setProgress, speed } = useDashboardContext();

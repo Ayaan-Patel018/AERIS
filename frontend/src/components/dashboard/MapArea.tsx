@@ -58,7 +58,7 @@ export const MapArea: React.FC = () => {
     if (layers.gt) drawTrajectory(ctx, gt.slice(0, currentIndex + 1), '#26262B', 1 / scale, true);
     if (layers.gnss) drawTrajectory(ctx, gnss.slice(0, currentIndex + 1), '#2DD4BF', 2 / scale, false);
     if (layers.fused && isOutage) {
-      const outageStartIndex = fused.findIndex((_, i) => gt[i].t >= 0.35); // OS = 0.35
+      const outageStartIndex = fused.findIndex((p) => p.status === 'outage' || p.status === 'unavailable');
       if (currentIndex >= outageStartIndex) {
          drawTrajectory(ctx, fused.slice(outageStartIndex, currentIndex + 1), '#F0801E', 2 / scale, false);
       }
@@ -79,14 +79,16 @@ export const MapArea: React.FC = () => {
 
     if (currentIndex > 0) {
       const prev = layers.fused ? fused[currentIndex - 1] : gnss[currentIndex - 1];
-      heading = Math.atan2(y - prev.y, x - prev.x);
+      if (prev) {
+        heading = Math.atan2(y - prev.y, x - prev.x);
+      }
     }
 
     // Draw uncertainties
-    if (layers.gnss && isOutage) {
+   if (layers.gnss && isOutage && currentGnssPos) {
       drawUncertaintyCircle(ctx, currentGnssPos.x, currentGnssPos.y, gnssError * 2, 'rgba(45,212,191,0.15)');
     }
-    if (layers.fused && isOutage) {
+    if (layers.fused && isOutage && currentFusedPos) {
       drawUncertaintyCircle(ctx, currentFusedPos.x, currentFusedPos.y, aerisError * 2, 'rgba(240,128,30,0.15)');
     }
 

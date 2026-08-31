@@ -13,8 +13,14 @@ export const TimelineSlider: React.FC = () => {
     setProgress(newProg);
   };
 
-  const currentSec = Math.floor(progress * TOTAL_DURATION);
-  const timeStr = `0:${String(currentSec).padStart(2, '0')} / 1:00`;
+  const formatTime = (totalSeconds: number) => {
+  const m = Math.floor(totalSeconds / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
+
+const currentSec = Math.floor(progress * TOTAL_DURATION);
+const timeStr = `${formatTime(currentSec)} / ${formatTime(TOTAL_DURATION)}`;
 
   const effectiveOS = simulateOutage ? 0 : OUTAGE_START;
   const effectiveOE = simulateOutage ? progress : OUTAGE_END;

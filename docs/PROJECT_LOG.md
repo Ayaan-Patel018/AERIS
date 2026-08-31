@@ -35,7 +35,7 @@ Timestamped, append-only. One entry per working session: what changed, what was 
 
 **Decided:** Static JSON export over live API for the MVP. GNSS quality detector is the single AI component. Map matching optional/nearest-road only.
 
-**VVIP — doc maintenance rule:** All 7 markdown docs + requirements.txt are living files, updated over time (same practice as the AI-Dubbing-Engine project). Claude updates them proactively when new decisions/info land, and Ayaan flags updates too. Every meaningful session ends with a PROJECT_LOG.md entry.
+**VVIP — doc maintenance rule:** All docs + requirements.txt are living files, updated over time (same practice as the AI-Dubbing-Engine project). Claude updates them proactively when new decisions/info land, and Ayaan flags updates too. Every meaningful session ends with a PROJECT_LOG.md entry.
 
 **Open:**
 - Confirm Node.js/npm present on Ayaan's machine
@@ -46,7 +46,7 @@ Timestamped, append-only. One entry per working session: what changed, what was 
 
 ---
 
-## 2026-08-29 (later still) — Dataset locked, terminology fixed, GPT review incorporated
+## 2026-08-29 (later) — Dataset locked, terminology fixed, GPT review incorporated
 **Did:**
 - Read the actual IO-VNBD paper (README_1.pdf, now in repo root). Confirmed full V-* (29 cols, VBOX) and S-* (24 cols, AndroSensor) column schemas with units.
 - **Naming fix (GPT's catch, correct call):** renamed `ground_truth.json` → `reference_trajectory.json` everywhere in the docs. VBOX GPS is a dedicated logger, not RTK — "reference" is honest, "ground truth" overclaims precision we don't have.
@@ -68,24 +68,24 @@ Timestamped, append-only. One entry per working session: what changed, what was 
 ## 2026-08-29 (later still) — Part I confirmed working; Part II design locked
 **Did:**
 - Wrote `backend/data_loader.py` against the real confirmed CSV structure (not the paper's description). Fixed two real bugs found by running it: (1) CSV encoding is Latin-1, not UTF-8 — both files' special characters (m/s², °, μT) were failing to parse; (2) S-* raw timestamp counter resets/wraps mid-sequence — fixed by building `timestamp_s` from cumulative forward-only deltas instead of simple subtraction.
-- **Part I confirmed done:** both S-S3b and V-S3b load cleanly, 681 s duration, 10 Hz, 6813 matching rows, GPS 100% available, IMU stats sane. Raw trajectory plot overlays both traces correctly — the repeated left/right turns pattern (the reason we picked this sequence) is clearly visible.
-- One open, non-blocking item logged in DATASET.md: `V-S3b`'s first column produces implausible "satellite count" values (max 137) — likely a column-order mismatch vs. the paper. Isolated as `vbox_col1_raw`, unused downstream, doesn't block anything.
-- **Part II (INS+EKF) design fully locked** after GPT review — recorded in detail in ARCHITECTURE.md "Part II design — LOCKED". Key upgrades over the original plan: nominal quaternion state kept separate from the 15-dim error state (avoids Euler singularities — this is the technically correct ES-EKF, not just "an EKF with 15 numbers"); yaw initialized from a short GPS displacement window instead of one heading sample, with an explicit unobservable-yaw flag if the vehicle starts stationary; GNSS outage modeled as a first-class per-step availability flag from day one, not bolted on later; a 4-mode ablation (pure INS / INS+GNSS / INS+NHC / full EKF) built into `ins_ekf.py` from the start — this gives the position-error-vs-time comparison chart "for free," which is the single most persuasive SIH figure.
-- **Scope call (mine, not blocking):** NHC ships as basic hard-threshold first; Mahalanobis/residual adaptive gating is a should-have added only after the 4-mode ablation works end to end, so it can't quietly eat a day we don't have.
+- **Part I confirmed done:** both S-S3b and V-S3b load cleanly, 681 s duration, 10 Hz, 6813 matching rows, GPS 100% available, IMU stats sane.
+- One open, non-blocking item logged in DATASET.md: `V-S3b`'s first column produces implausible "satellite count" values (max 137) — likely a column-order mismatch vs. the paper. Isolated as `vbox_col1_raw`, unused downstream.
+- **Part II (INS+EKF) design fully locked** after GPT review — recorded in ARCHITECTURE.md "Part II design — LOCKED". Nominal quaternion state kept separate from the 15-dim error state; yaw initialized from a short GPS displacement window with unobservable-yaw flag; GNSS outage modeled as a first-class per-step availability flag; 4-mode ablation (pure INS / INS+GNSS / INS+NHC / full EKF) built in from the start.
+- **Scope call (mine, not blocking):** NHC ships as basic hard-threshold first; adaptive gating deferred.
 
-**Decided:** `ins_ekf.py` is next. Local ENU conversion, nominal+error state separation, and the 4-mode ablation are all mandatory parts of the first implementation, not later additions.
+**Decided:** `ins_ekf.py` is next.
 
 **Open:**
 - `vbox_col1_raw` real identity (non-blocking)
-- Confirm whether S-S3b's vehicle is stationary at t=0 (affects whether yaw-init needs the unobservable-flag path)
+- Confirm whether S-S3b's vehicle is stationary at t=0
 - JSON schema still to be frozen at end of Part III
 
 ---
 
-## 2026-08-29 — Part II DONE: ES-EKF running, ablation confirmed working
+## 2026-08-29 (later still) — Part II DONE: ES-EKF running, ablation confirmed working
 **Did:**
-- Wrote `backend/ins_ekf.py`: full 15-state ES-EKF with nominal quaternion state + separate error state, local ENU conversion, GPS displacement-window yaw init with unobservable flag, GNSS outage as first-class per-step flag, hard-threshold NHC pseudo-measurement, GPS velocity update, 4-mode ablation, position error evaluation, JSON export matching the agreed schema.
-- **Confirmed working on S-S3b** — ran all 4 modes with a 60-second outage (200–260 s):
+- Wrote `backend/ins_ekf.py`: full 15-state ES-EKF, local ENU conversion, GPS displacement-window yaw init, GNSS outage as first-class per-step flag, hard-threshold NHC, GPS velocity update, 4-mode ablation, JSON export.
+- **Confirmed working on S-S3b** — 60-second outage:
 
 | Mode | Mean error | RMSE | Max |
 |---|---|---|---|
@@ -94,110 +94,80 @@ Timestamped, append-only. One entry per working session: what changed, what was 
 | ins_nhc | 572 m | 644 m | 1,112 m |
 | **full** | **73 m** | **79 m** | **167 m** |
 
-- Plot confirms: full system (green) tracks the reference through the outage; ins_only (orange) drifts 34 km off; ins_gnss (blue) spikes hard during the outage; ins_nhc (purple) stays contained without GPS. The comparison chart is the SIH slide.
-- JSON files exported to `backend/exports/`: `reference_trajectory.json`, `gnss_only.json`, `fused_output.json`. These are ready for Aryan to wire into the frontend.
-- **One known issue (non-blocking):** `ins_only` trajectory starts pointing in the wrong direction — likely a yaw initialization issue (vehicle may be near-stationary at t=0, making GPS displacement heading unreliable). The `full` mode is unaffected. Fix in a tuning pass before the demo.
+- JSON files exported to `backend/exports/`. Ready for Aryan to wire into frontend.
+- **One known issue (non-blocking):** `ins_only` trajectory starts pointing in the wrong direction — likely yaw init. `full` mode unaffected.
 
-**Decided:** JSON schema is now effectively locked by the exported files. Aryan can start wiring frontend against these. Any schema change needs announcement to both tracks (per RULES.md).
+**Decided:** JSON schema effectively locked by the exported files.
 
 **Open:**
-- Yaw init tuning for `ins_only` mode (non-blocking — `full` mode is fine)
-- Part III: outage simulation for multiple window lengths (30s/60s/120s) and export all variants
+- Yaw init tuning for `ins_only` mode
+- Part III: multiple outage window lengths (30s/60s/120s)
 - Part V: GNSS quality detector
 - Frontend: Aryan to scaffold and wire against the exported JSONs
 
 ---
 
-## 2026-08-29 (final) — Polish 1+2 done, S1 validation run, real gyro axis bug found and fixed
+## 2026-08-29 (later still) — Polish 1+2 done, S1 validation run, real gyro axis bug found and fixed
 **Did:**
-- **Polish 1 (adaptive GNSS noise):** wired the GNSS quality classification into `update_gnss_position()` — noise scales 1x/3x/10x for healthy/degraded/unavailable. Confirmed working, no regression.
-- **Polish 2 (ZUPT):** added `update_zupt()`, triggered when GPS speed < 0.3 m/s for 3+ consecutive rows. `ins_nhc` mean improved slightly (628→605 m on S3b) — free accuracy at stops, confirmed.
-- **Polish 3 (S1 validation, unseen sequence, zero tuning):** ran the exact same pipeline on S1 (86 min, Coventry, much longer/more varied than S3b's 11 min). Results:
+- **Polish 1 (adaptive GNSS noise):** wired GNSS quality classification into `update_gnss_position()` — noise scales 1x/3x/10x for healthy/degraded/unavailable.
+- **Polish 2 (ZUPT):** added `update_zupt()`, triggered when GPS speed < 0.3 m/s for 3+ consecutive rows.
+- **Polish 3 (S1 validation, unseen sequence, zero tuning):** ran the exact same pipeline on S1 (86 min vs. S3b's 11 min):
 
 | Sequence | Full system, 60s outage: mean / max |
 |---|---|
 | S3b (development) | 68.9 m / 153.4 m |
 | **S1 (unseen validation)** | **115.2 m / 718.7 m** |
 
-Same order of magnitude, not identical (expected/good — identical would look suspicious). This is the "not cherry-picked" evidence for the pitch.
+Same order of magnitude, not identical (expected/good). "Not cherry-picked" evidence for the pitch.
 
-**Honest finding, not a bug:** `ins_nhc` alone degraded much more on S1 (5,040 m) than S3b (605 m) — hard-threshold NHC's lateral-velocity≈0 assumption holds better at town speeds than across S1's longer motorway segments. `full` mode stays consistent on both because GNSS corrects the bias NHC introduces alone at highway speed. This is a genuine finding worth stating in the pitch, not hiding.
+**Honest finding, not a bug:** `ins_nhc` alone degraded much more on S1 (5,040 m) than S3b (605 m) — hard-threshold NHC's lateral-velocity≈0 assumption holds better at town speeds than S1's motorway segments. `full` mode stays consistent on both because GNSS corrects NHC's bias.
 
-**Caution noted (GPT, correct):** never say "100% improvement" — S1's ins_only diverges to 315,455 m, so any real result rounds to 100.0% at one decimal. Always quote the actual mean/max numbers instead of the percentage when the percentage would look fabricated.
+**Caution noted (GPT, correct):** never say "100% improvement" without the actual numbers — S1's ins_only diverges to 315,455 m, so any real result rounds to 100.0% at one decimal, which looks fabricated if quoted alone.
 
-- **Polish 4 (yaw/gyro axis bug, found and fixed):** the body-frame gyro vector was built as `[yaw_rate, pitch_rate, roll_rate]` mapped directly to `[X, Y, Z]` — but IO-VNBD's phone axis convention (Fig. 2: X=forward/roll axis, Y=left/pitch axis, Z=up/yaw axis) means the CSV's semantically-named Yaw/Pitch/Roll columns needed reordering to `[roll_rate, pitch_rate, yaw_rate]` = `[X, Y, Z]`. This was silently swapping yaw and roll rotation into the wrong axes during INS propagation — likely the real cause of `ins_only`'s wrong-direction drift. **Fixed the convention, not the result** — re-running to confirm, not to chase a better-looking number (per GPT's correct caution on this exact point).
+- **Polish 4 (yaw/gyro axis bug, found and fixed):** body-frame gyro vector was built as `[yaw_rate, pitch_rate, roll_rate]` mapped to `[X, Y, Z]`, but IO-VNBD's phone axis convention needs `[roll_rate, pitch_rate, yaw_rate]` = `[X, Y, Z]`. Fixed the convention, not the result.
 
-**Decided:** JSON schema is frozen (Aryan can build against it without waiting). No more schema changes without announcing to both tracks per RULES.md.
+**Decided:** JSON schema frozen. No changes without announcing to both tracks per RULES.md.
 
 **Open:**
-- Confirm gyro axis fix doesn't regress `full` mode numbers (should be neutral/positive, not negative, since GNSS+NHC were already compensating)
-- Frontend: Aryan scaffolding independently against exported JSON
-- Sept 1 onward: freeze, no new features, only bug fixes + rehearsal per the locked Aug29→Sept4 timeline
+- Confirm gyro axis fix doesn't regress `full` mode numbers
+- Frontend: Aryan scaffolding independently
+- Sept 1 onward: freeze, only bug fixes + rehearsal
 
 ---
 
-## 2026-08-29 (later) — Architecture doc enriched from full design source
-**Did:** Re-read the full 27-part design doc and pulled in everything viable that the condensed version had dropped:
-- Replaced the small pipeline sketch with the full 12-module block diagram (ARCHITECTURE.md), with a note that 100 Hz was the design target but IO-VNBD is ~10 Hz.
-- Added "AI vs classical" defense table, the error-growth physics (bias → time² drift), and the EKF-vs-UKF-vs-particle-filter rationale — the three things judges probe hardest.
-- Added condensed failure-modes table + the "seamless mode switching" explanation (why the tunnel transition looks smooth, not teleporting).
-- Added the 15-concept learning list to PROJECT_BRIEF.md for the backend lead.
-**Decided:** ARCHITECTURE.md is now the single richest reference; the original DeepSeek doc is archival only.
-**Open:** unchanged from prior entry (Node.js check, JSON schema freeze, demo sequence pick).
+## 2026-08-29 (later still) — Architecture doc enriched from full design source
+**Did:** Re-read the full 27-part design doc and pulled in everything viable the condensed version had dropped: full 12-module block diagram, "AI vs classical" defense table, error-growth physics, EKF-vs-UKF-vs-particle-filter rationale, failure-modes table, seamless mode switching explanation, 15-concept learning list.
+**Decided:** ARCHITECTURE.md is the single richest reference; the original design doc is archival only.
+**Open:** unchanged from prior entry.
 
 ---
 
-## 2026-08-30 — Backend test suite built and confirmed passing (161 tests)
+## 2026-08-30/31 — Anurag's EKF audit PR reviewed and merged; requirements.txt incident
 **Did:**
-- Built a full test suite in `backend/tests/` (6 files, 161 tests, zero new pip dependencies).
-- Layer 1 (unit, no dataset needed): math utilities, INS propagation, ES-EKF mechanics, GNSS classifier, data loader helpers — 92 tests, all pass, ~0.6s.
-- Layer 2 (integration, requires IO-VNBD): loader integration, full pipeline smoke, 4-mode ablation ordering, 3 outage durations, export_json + evaluate_error correctness — 37 tests (skip gracefully when dataset absent, confirmed would run on the machine with data).
-- Layer 3 (JSON schema, runs on existing exports): all 3 root export files + eval/outage_60s + evaluation_summary.json validated — 32 tests, all pass.
-- Confirmed all passing: exit code 0, 161 executed, 37 skipped (dataset not on CI machine).
-- Entry point: `python run_tests.py` (with `--unit-only`, `--verbose`, `--failfast` flags).
+- Reviewed all 4 changed backend files in Anurag's PR (`data_loader.py`, `ins_ekf.py`, `outage_analysis.py`, `validate_s1.py`) line-by-line before merge, per RULES.md's precheck rule. Verdict: legitimate fixes, not stylistic changes.
+- **Real bug caught and fixed by Anurag:** missing attitude self-propagation term in the EKF's error-state Jacobian (`F[6:9,6:9] = I - skew(w)·dt`) — technically required for a correct error-state EKF, was silently defaulting to identity before.
+- **Real bug caught and fixed by Anurag:** the outage `gnss_status` flag was dead code — `gnss_available` was defined as `not in_outage AND ...`, making the branch that set `gnss_flag = "outage"` structurally unreachable. Fixed to properly distinguish "outage" from "unavailable."
+- Also: Q matrix now scales with actual per-step dt (was baked at constructor time); `get_dataset_root()` path-resolution helper added; UTF-8 stdout fix for Windows.
+- **161-test suite added and verified** (confirmed by running it ourselves, not just trusting the PR description — first partial run with `--unit-only` showed 92, full run confirmed all 161).
+- Found and fixed a second bug in Anurag's own `conftest.py`: its dataset path was hardcoded to Anurag's personal machine's folder layout (`"GNN and RAG"` — his own folder name), causing all integration tests to silently skip on Ayaan's machine. Fixed by reusing `get_dataset_root()` instead of duplicating path logic.
+- Merged. Corrected numbers post-fix: **S3b 85.8 m mean / 179.3 m max, S1 166.5 m mean / 789.2 m max** (slightly worse than pre-fix numbers, which is expected and reassuring — the old numbers were quietly optimistic due to the missing Jacobian term).
+- **Incident:** Aryan's frontend merge (via `git pull`, not a PR) accidentally deleted `requirements.txt` (a "remove unused python scripts" cleanup commit that swept it up unintentionally). Caught and restored from Anurag's merge commit.
 
-**Key test design decisions:**
-- Pure `unittest`, no pytest — avoids new requirements.txt entries.
-- Synthetic DataFrames in `conftest.py` — Layer 1 runs anywhere with no data.
-- Integration tests use `@unittest.skipUnless(DATASET_AVAILABLE, ...)` — exit 0 on CI without dataset.
-- Every test has a one-line docstring saying what *property* it proves, not just "does it run".
-- Each test file has `# EXTENSION POINT` comment for where next module's tests go (AI velocity, map matching).
+**Decided:** Corrected (slightly worse) numbers are the honest, defensible ones — reflect them in README, not the earlier pre-fix figures.
 
-**Open:**
-- Frontend scaffold still pending (Part IV — next session).
+**Open:** README numbers need updating to the corrected values (85.8/179.3 S3b, 166.5/789.2 S1) if not already done.
 
 ---
 
-## 2026-08-30 — EKF core audit, 3 bug fixes, IO-VNBD downloaded, all exports regenerated
+## 2026-08-31 — Frontend integration: found frontend was built on 100% synthetic data, fixed the real gap
+**Did:** Full writeup in `docs/FRONTEND_INTEGRATION.md` — read that for complete detail. Summary:
+- Discovered Aryan's dashboard UI (built ahead of backend readiness, standard practice) was rendering entirely synthetic data — fake `{x,y,t}` point arrays, and a `useGNSSStatus.ts` hook where velocity/confidence/drift were literal sine-wave/arithmetic formulas, not real EKF output.
+- Found 2 real structural bugs in the existing frontend code while reviewing (index misalignment across differently-sized real arrays; an unguarded `array[-1]` access that would crash the demo at playback start).
+- Built `backend/export_frontend_data.py` — an adapter reshaping our already-frozen, tested backend exports into the exact format the frontend's existing components expect (ENU metres, time-aligned across all three trajectories), rather than rewriting Aryan's UI code.
+- Rewrote `useGNSSStatus.ts` and `useTrajectoryData.ts`; patched 3 lines in `MapArea.tsx` and 1 in `TimelineSlider.tsx` (exact diffs in FRONTEND_INTEGRATION.md).
+- Along the way, fixed 2 more real bugs found by inspection: velocity was in m/s but labeled/displayed as km/h (3.6x display error); heading could be negative but the UI expects 0-360°.
+- **3 fake data points still flagged, not yet fixed:** ChartsPanel's velocity chart (sine wave), MetricsPanel's "VEL ERROR" (hardcoded), StatusPanel's "SATELLITES" (hardcoded). Tracked in FRONTEND_INTEGRATION.md's "Still fake" section — check that before assuming the dashboard is fully real.
 
-**Did:**
-- **Downloaded IO-VNBD dataset** via `git clone --depth 1` to `../IO-VNBD/` (731 files). Fixed all 4 backend scripts (`data_loader.py`, `ins_ekf.py`, `outage_analysis.py`, `validate_s1.py`) to use a robust `get_dataset_root()` function that searches multiple candidate directories.
-- **EKF core audit** — read every line of `ins_ekf.py` (758 lines) and found 3 real bugs:
-  1. **Q matrix not scaled per step** — process noise was baked at `dt=0.1` in constructor, but actual dt varies. Now recomputed each `predict()` call.
-  2. **Missing F[6:9,6:9] attitude self-propagation** — attitude error state wasn't rotating with the vehicle. Added `I - skew(w_corr)·dt`.
-  3. **Dead outage flag branch** — `gnss_flag = "outage"` was unreachable. Fixed so JSON exports correctly distinguish "outage" from "unavailable".
-- **Regenerated all exports** with fixed EKF:
-  - `ins_ekf.py` → root JSONs + ablation PNG
-  - `outage_analysis.py` → 3 scenario JSONs + evaluation_summary.json + plots
-  - `validate_s1.py` → S1 validation summary + plot (fixed missing `import json`)
-- **Fixed Windows UTF-8** encoding in `outage_analysis.py` and `validate_s1.py`.
-- **Updated README** with accurate numbers from fresh runs.
-- **161/161 tests pass**, 0 skips (IO-VNBD now on disk), 64 seconds.
+**Decided:** Don't rewrite Aryan's components wholesale — patch precisely, reuse his existing structure, adapt data to fit what he built rather than the reverse. This kept every fix small and reviewable.
 
-**Updated numbers (post-fix EKF):**
-
-| Metric | S3b (60s outage) | S1 (60s outage) |
-|---|---|---|
-| Full system mean | 85.8 m | 166.5 m |
-| Full system max | 179.3 m | 789.2 m |
-| INS-only mean | 12,602 m | 302,125 m |
-| vs INS-only improvement | 99.3% | 99.9% |
-
-**Decided:**
-- Numbers are slightly higher than pre-fix (85.8 m vs 65.7 m at 60s) because the fixed Q scaling and attitude propagation changed the filter dynamics. This is the *correct* answer — the old numbers were computed with a subtly wrong filter.
-- The "improvement vs GNSS-only" story is clearest at 120s outage (85.9% for S3b, where INS+GNSS collapses to 696 m while full holds at 98 m). At 30–60s, INS+GNSS is competitive because GPS hasn't been gone long enough to drift badly.
-
-**Open:**
-- Frontend scaffold (Part IV) — this is the highest-impact remaining work. Judges need to SEE the vehicle on a map.
-- ML GNSS quality classifier — would make "Intelligent" literally true (currently rule-based).
-
+**Open:** Confirm the current fix actually renders correctly in-browser (in progress). Once confirmed, next phase is closing the 3 remaining fake-data spots using the same adapter-extension pattern. README numbers also still need the Anurag-merge correction applied (see prior entry).
