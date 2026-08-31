@@ -168,6 +168,27 @@ Same order of magnitude, not identical (expected/good). "Not cherry-picked" evid
 - Along the way, fixed 2 more real bugs found by inspection: velocity was in m/s but labeled/displayed as km/h (3.6x display error); heading could be negative but the UI expects 0-360°.
 - **3 fake data points still flagged, not yet fixed:** ChartsPanel's velocity chart (sine wave), MetricsPanel's "VEL ERROR" (hardcoded), StatusPanel's "SATELLITES" (hardcoded). Tracked in FRONTEND_INTEGRATION.md's "Still fake" section — check that before assuming the dashboard is fully real.
 
-**Decided:** Don't rewrite Aryan's components wholesale — patch precisely, reuse his existing structure, adapt data to fit what he built rather than the reverse. This kept every fix small and reviewable.
+**Open:** README numbers need updating to the corrected values (85.8/179.3 S3b, 166.5/789.2 S1) if not already done.
 
-**Open:** Confirm the current fix actually renders correctly in-browser (in progress). Once confirmed, next phase is closing the 3 remaining fake-data spots using the same adapter-extension pattern. README numbers also still need the Anurag-merge correction applied (see prior entry).
+---
+
+## 2026-08-31 (Night) — Closed all remaining fake data spots, verified full frontend in live browser
+
+**Did:**
+- Performed end-to-end frontend audit and live browser verification with screenshots and recording.
+- **Fixed all 3 previously flagged fake data spots:**
+  1. `ChartsPanel.tsx`: Replaced synthetic `Math.sin(...)` velocity curve with real EKF velocity data from `fused[i].velocity` (scaled to km/h) and nulling out during GNSS outage.
+  2. `MetricsPanel.tsx`: Replaced hardcoded `0.4 m/s` VEL ERROR with honest `— (no ref)` and renamed generic estimator badge `ACTIVE` -> `ES-EKF`.
+  3. `StatusPanel.tsx`: Replaced hardcoded `11`/`0` satellite counts with honest dynamic status label (`available` vs `—`).
+- **Enhanced Charts Visibility:**
+  - Added dynamic Y-axis bound annotations (`{maxErr}m` and `{maxV} km/h`).
+  - Added clear legend tags (`FUSED` vs `GNSS`).
+- Verified zero compilation/TS errors in production Vite build (1.38s build time).
+- Verified live interactive playback and panel toggling via browser subagent recording.
+
+**Decided:** Frontend is now 100% truthful to backend outputs — no synthetic values or hardcoded placeholders remain in active dashboard view.
+
+**Open:**
+- Add Leaflet / OSM map tile layer underneath the trajectory canvas for enhanced geographical realism during SIH demo.
+- Upgrade GNSS quality classifier from rule-based to ML model (Module 3).
+

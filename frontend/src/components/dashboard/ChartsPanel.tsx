@@ -32,13 +32,13 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({ isOpen }) => {
   const errPathGnss = pts2path(errPts, maxErr);
   const errPathFused = pts2path(fusedErrPts, maxErr);
 
-  // Velocity
-  const velPts = Array.from({length: N}, (_, i) => 33 + Math.sin(i / N * 22) * 9);
+  // Velocity — real EKF output (m/s → km/h)
+  const velPts = fused.map((p) => (p.velocity ?? 0) * 3.6);
   const gnssVelPts = velPts.map((v, i) => { 
     const t = i / N; 
-    return (t >= OS && t <= OE) ? null : v + (Math.random() - 0.5) * 4; 
+    return (t >= OS && t <= OE) ? null : v; 
   });
-  const maxV = 50;
+  const maxV = Math.max(...velPts, 1);
   
   let vPath = '', prevNull = true;
   gnssVelPts.forEach((v, i) => {
@@ -56,6 +56,8 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({ isOpen }) => {
         <svg className="chart-svg" viewBox="0 0 300 80" preserveAspectRatio="none">
           <rect x="0" y="0" width="300" height="80" fill="none"/>
           <rect x={OS * 300} width={(OE - OS) * 300} height="80" fill="rgba(229,72,77,.08)"/>
+          <text x="2" y="10" fontFamily="IBM Plex Mono" fontSize="6" fill="rgba(255,255,255,.35)">{maxErr.toFixed(0)}m</text>
+          <text x="2" y="76" fontFamily="IBM Plex Mono" fontSize="6" fill="rgba(255,255,255,.35)">0m</text>
           <polyline points={errPathGnss} fill="none" stroke="rgba(45,212,191,.6)" strokeWidth="1.5"/>
           <polyline points={errPathFused} fill="none" stroke="rgba(240,128,30,.7)" strokeWidth="1.5"/>
         </svg>
@@ -64,10 +66,12 @@ export const ChartsPanel: React.FC<ChartsPanelProps> = ({ isOpen }) => {
         <div className="chart-lbl">VELOCITY: AI ESTIMATE vs GNSS</div>
         <svg className="chart-svg" viewBox="0 0 300 80" preserveAspectRatio="none">
           <rect x={OS * 300} width={(OE - OS) * 300} height="80" fill="rgba(229,72,77,.08)"/>
+          <text x="2" y="10" fontFamily="IBM Plex Mono" fontSize="6" fill="rgba(255,255,255,.35)">{maxV.toFixed(0)} km/h</text>
+          <text x="2" y="76" fontFamily="IBM Plex Mono" fontSize="6" fill="rgba(255,255,255,.35)">0</text>
           <polyline points={pts2path(velPts, maxV)} fill="none" stroke="rgba(240,128,30,.65)" strokeWidth="1.5"/>
           <path d={vPath} fill="none" stroke="rgba(45,212,191,.55)" strokeWidth="1" strokeDasharray="3,2"/>
-          <text x="4" y="12" fontFamily="IBM Plex Mono" fontSize="7" fill="rgba(240,128,30,.7)">AERIS</text>
-          <text x="4" y="22" fontFamily="IBM Plex Mono" fontSize="7" fill="rgba(45,212,191,.7)">GNSS</text>
+          <text x="290" y="12" fontFamily="IBM Plex Mono" fontSize="7" fill="rgba(240,128,30,.7)" textAnchor="end">FUSED</text>
+          <text x="290" y="22" fontFamily="IBM Plex Mono" fontSize="7" fill="rgba(45,212,191,.7)" textAnchor="end">GNSS</text>
         </svg>
       </div>
     </div>

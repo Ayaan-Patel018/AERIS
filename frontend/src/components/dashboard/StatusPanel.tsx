@@ -33,7 +33,7 @@ export const StatusPanel: React.FC = () => {
         </div>
         <div className="sb-stat-row">
           <span className="sb-k">SATELLITES</span>
-          <span className="sb-v data">{isOutage ? '0' : '11'}</span>
+          <span className="sb-v data">{isOutage ? '—' : 'available'}</span>
         </div>
         <div className="sb-stat-row">
           <span className="sb-k">OUTAGE TIMER</span>
