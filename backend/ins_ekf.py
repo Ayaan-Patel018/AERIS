@@ -739,6 +739,11 @@ def rts_smooth(result: dict, lat0: float, lon0: float) -> dict:
 
         dx_smooth[k] = dx_upd_list[k] + C_k @ dx_smooth[k + 1]
         P_smooth[k]  = P_upd_list[k] + C_k @ (P_smooth[k + 1] - P_pred_list[k + 1]) @ C_k.T
+        # Defensive symmetrization — verified unnecessary in testing (max
+        # asymmetry ~1e-16, machine epsilon) but cheap insurance against
+        # floating-point drift accumulating over a much longer real sequence
+        # (6800+ steps vs the synthetic 300-point test this was checked on).
+        P_smooth[k] = (P_smooth[k] + P_smooth[k].T) / 2
 
     # ── inject smoothed correction onto the INS-predicted nominal trajectory ─
     R_earth = 6_371_000.0
