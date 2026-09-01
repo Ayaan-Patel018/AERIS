@@ -44,6 +44,8 @@ SIGMA_GNSS_VEL      = 0.3      # m/s     GPS velocity noise
 SIGMA_NHC_LAT       = 0.05     # m/s     lateral velocity pseudo-noise (NHC)
 SIGMA_NHC_VERT      = 0.05     # m/s     vertical velocity pseudo-noise (NHC)
 
+SIGMA_ZARU          = 0.01     # rad/s   near-zero angular rate noise (ZARU, at confirmed stops)
+
 # ── lat/lon → local ENU ──────────────────────────────────────────────────────
 def latlon_to_enu(lat, lon, lat0, lon0):
     """
@@ -288,13 +290,12 @@ class ESEKF:
         F[3:6, 6:9]   = -R @ skew(a_corr) * dt
         # δv ← δba
         F[3:6, 9:12]  = -R * dt
-        # δθ ← δθ  (attitude error self-propagation under rotation)
+        # δθ ← δθ (attitude error self-propagation under rotation — Anurag's fix)
         F[6:9, 6:9]   = np.eye(3) - skew(w_corr) * dt
         # δθ ← δbg
         F[6:9, 12:15] = -np.eye(3) * dt
 
-        # Fix 1: Q must scale with actual dt, not constructor dt
-        # (IO-VNBD has ~10 Hz with occasional gaps — Q must reflect real interval)
+        # Q scales with actual per-step dt, not constructor dt — Anurag's fix
         q_a  = (SIGMA_ACCEL_NOISE  * dt)**2
         q_g  = (SIGMA_GYRO_NOISE   * dt)**2
         q_ba = (SIGMA_ACCEL_BIAS   * dt)**2
@@ -307,6 +308,7 @@ class ESEKF:
             q_bg, q_bg, q_bg,
         ])
 
+        self.last_F = F   # exposed for RTS smoother — needed for backward recursion
         self.P  = F @ self.P @ F.T + Q_dt
         self.dx = F @ self.dx
 
@@ -379,6 +381,24 @@ class ESEKF:
         z = -state.v        # innovation: measured vel = 0, predicted = state.v
         self._update(H, R, z)
 
+    def update_zaru(self, state: NominalState, gyro_body: np.ndarray) -> None:
+        """
+        Zero Angular Rate Update (ZARU).
+        When the vehicle is confirmed stationary (same detector as ZUPT —
+        deliberately reused, not a second stop-detector, per review: don't
+        trust two different "are we stopped" definitions), true angular
+        velocity is ~0, so the raw gyro reading is ~entirely bias:
+            gyro_body ≈ bg + noise   when w_true ≈ 0
+        This directly corrects gyro bias, which is the dominant driver of
+        heading drift during a subsequent GNSS outage — bounding heading
+        error at every stop, not just velocity error (that's ZUPT's job).
+        """
+        H = np.zeros((3, self.n))
+        H[0:3, 12:15] = np.eye(3)          # maps to δbg block
+        R = np.eye(3) * SIGMA_ZARU**2
+        z = gyro_body - state.bg           # innovation: measured ≈ bg when stationary
+        self._update(H, R, z)
+
     def inject_corrections(self, state: NominalState) -> NominalState:
         """
         Apply error state corrections to nominal state, then reset error state.
@@ -426,7 +446,9 @@ def run_pipeline(
     s_df,
     v_df,
     mode:          str = "full",
-    outage_window: Optional[Tuple[float, float]] = None
+    outage_window: Optional[Tuple[float, float]] = None,
+    use_zaru:      bool = False,
+    store_smoothing_data: bool = False,
 ) -> dict:
     """
     Run the navigation pipeline for one mode.
@@ -434,6 +456,14 @@ def run_pipeline(
     mode: one of 'ins_only', 'ins_gnss', 'ins_nhc', 'full'
     outage_window: (t_start, t_end) in seconds — GNSS is suppressed in this window.
                    None = GNSS always available.
+    use_zaru: apply Zero Angular Rate Update alongside ZUPT at confirmed stops
+              (bounds gyro-bias/heading drift). Off by default — the original
+              4-mode ablation (run_all_modes) stays exactly as validated;
+              this is opt-in for the RTS/ZARU improvement comparison only.
+    store_smoothing_data: capture per-step F, P (pre/post-update), and the
+              raw nominal state needed for offline RTS smoothing (see
+              rts_smooth()). Off by default — adds memory/CPU, not needed
+              for normal ablation runs.
 
     Returns a dict with per-step results for export and evaluation.
     """
@@ -454,6 +484,12 @@ def run_pipeline(
     timestamps, positions, velocities, headings = [], [], [], []
     covariances, gnss_flags = [], []
     n = len(s_df)
+
+    # Smoothing-data containers (only populated if store_smoothing_data=True)
+    smooth_F, smooth_P_pred, smooth_P_upd = [], [], []
+    smooth_pred_p, smooth_pred_v, smooth_pred_q = [], [], []
+    smooth_dx_upd = []
+    zaru_trigger_count = 0
 
     for i in range(1, n):
         row_prev = s_df.iloc[i-1]
@@ -485,6 +521,10 @@ def run_pipeline(
         state = ins_propagate(state, accel, gyro, dt)
         ekf.predict(state, accel, gyro)
 
+        if store_smoothing_data:
+            smooth_F.append(ekf.last_F.copy())
+            smooth_P_pred.append(ekf.P.copy())   # covariance right after predict, before any update
+
         # ── GNSS availability ─────────────────────────────────────────────
         t = row["timestamp_s"]
         in_outage = (outage_window is not None
@@ -494,8 +534,8 @@ def run_pipeline(
                           and not np.isnan(row["gps_lat"]))
 
         gnss_flag = "unavailable"
-        if in_outage:
-            gnss_flag = "outage"   # Fix 2: outage is distinct from no-signal
+        if gnss_available:
+            gnss_flag = "outage" if in_outage else "healthy"
 
         # ── Polish 1: GNSS quality classification ─────────────────────────
         # Compute per-step quality before the EKF update
@@ -507,7 +547,6 @@ def run_pipeline(
             if np.isnan(sats) or sats < 6:
                 gps_quality = "unavailable"
                 gnss_available = False
-                gnss_flag = "unavailable"
             elif sats < 8 or (not np.isnan(acc) and acc > 10.0):
                 gps_quality = "degraded"
                 gnss_flag   = "degraded"
@@ -540,9 +579,42 @@ def run_pipeline(
         if cfg["use_nhc"]:
             ekf.update_nhc(state)
 
-        # ── ZUPT update (Polish 2) ────────────────────────────────────────
+        # ── ZUPT update (Polish 2) — unchanged, already validated ──────────
         if zupt_active:
             ekf.update_zupt(state)
+
+            # ── ZARU — stricter confidence gate on top of zupt_active ──────
+            # Locked requirement (ARCHITECTURE.md Part VI, GPT's catch):
+            # "never a bare speed < threshold check" for ZARU specifically.
+            # ZUPT above is untouched (already validated by 161 tests on its
+            # existing speed-only trigger) — ZARU additionally requires low
+            # acceleration AND low gyro magnitude, confirming the vehicle is
+            # truly stationary (not just momentarily slow), since ZARU writes
+            # directly into gyro bias and a false trigger would corrupt it.
+            if use_zaru:
+                accel_mag = float(np.linalg.norm(accel))
+                gyro_mag  = float(np.linalg.norm(gyro))
+                # accel_mag includes gravity component removed already
+                # (linear_accel_*), so near-zero here means near-constant
+                # velocity, not just "slow"; gyro_mag near-zero means not rotating.
+                if accel_mag < 0.5 and gyro_mag < 0.05:
+                    ekf.update_zaru(state, gyro)
+                    zaru_trigger_count += 1
+
+        if store_smoothing_data:
+            smooth_P_upd.append(ekf.P.copy())   # covariance after all updates, before injection
+            # CRITICAL: capture the REAL, nonzero pre-reset correction and the
+            # nominal state it applies to (state here is still nominal_pred[k] —
+            # ins_propagate's output, untouched by predict()/update() calls,
+            # which only ever modify ekf.dx/ekf.P, never `state` itself).
+            # This is the quantity a correct RTS backward pass needs — using
+            # the always-zero POST-reset dx here (as an earlier version of
+            # this code did) silently forces every smoothed correction to
+            # zero, which is a bug, not a "smoothing had no effect" result.
+            smooth_dx_upd.append(ekf.dx.copy())
+            smooth_pred_p.append(state.p.copy())
+            smooth_pred_v.append(state.v.copy())
+            smooth_pred_q.append(state.q.copy())
 
         # ── inject corrections ─────────────────────────────────────────────
         state = ekf.inject_corrections(state)
@@ -561,7 +633,7 @@ def run_pipeline(
         covariances.append(float(np.trace(ekf.P[0:3, 0:3])))
         gnss_flags.append(gnss_flag)
 
-    return {
+    result = {
         "mode":           mode,
         "outage_window":  outage_window,
         "yaw_observable": yaw_obs,
@@ -573,7 +645,21 @@ def run_pipeline(
         "gnss_status":    gnss_flags,
         "lat0":           lat0,
         "lon0":           lon0,
+        "zaru_trigger_count": zaru_trigger_count,
     }
+
+    if store_smoothing_data:
+        result["_smoothing_data"] = {
+            "F":      smooth_F,
+            "P_pred": smooth_P_pred,
+            "P_upd":  smooth_P_upd,
+            "dx_upd": smooth_dx_upd,
+            "pred_p": smooth_pred_p,
+            "pred_v": smooth_pred_v,
+            "pred_q": smooth_pred_q,
+        }
+
+    return result
 
 
 def run_all_modes(s_df, v_df,
@@ -584,6 +670,141 @@ def run_all_modes(s_df, v_df,
     """
     return {m: run_pipeline(s_df, v_df, mode=m, outage_window=outage_window)
             for m in MODES}
+
+
+# ── RTS (Rauch-Tung-Striebel) fixed-interval smoother ────────────────────────
+def rts_smooth(result: dict, lat0: float, lon0: float) -> dict:
+    """
+    Offline backward smoothing pass over an ALREADY-COMPLETED forward run
+    (run_pipeline must have been called with store_smoothing_data=True).
+
+    Legitimate ONLY because the demo replays a precomputed, recorded
+    trajectory — this is a post-processing/evaluation step, not something
+    a real-time phone navigation system could do (it doesn't have future
+    measurements). Keep this output in a SEPARATE file from the real-time
+    fused_output.json and label both honestly on the dashboard.
+
+    Error-state + quaternion subtlety (do not skip this reasoning):
+    After every forward step, inject_corrections() moves the error mean
+    into the nominal state and resets δx to 0 for the NEXT step's predict.
+    The correction that WAS actually applied at step k — call it dx_upd[k]
+    — is nonzero right before that reset, and is exactly the tangent-space
+    difference between the INS-only predicted state at k and the corrected
+    (filtered) state at k. THIS is the forward "filtered mean" a correct
+    RTS backward pass must use — using the always-zero POST-reset dx
+    instead (an earlier bug in this function) silently forces every
+    smoothed correction to zero: mathematically guaranteed, not a real
+    "smoothing had no effect" finding. The smoothed correction is injected
+    into the nominal quaternion using the SAME small-angle convention the
+    forward filter already uses — never a raw quaternion interpolation.
+
+    Standard RTS backward recursion, correctly adapted for the reset
+    (k = N-2 downto 0; base case dx_smooth[N-1] = dx_upd[N-1], the real
+    last-step correction, not zero):
+        C_k           = P_upd[k] @ F[k+1].T @ inv(P_pred[k+1])
+        dx_smooth[k]  = dx_upd[k] + C_k @ dx_smooth[k+1]
+                        (x_pred[k+1]'s mean is genuinely 0 in this system —
+                         every step resets dx to 0 before its own predict,
+                         so that term legitimately drops out; it is ONLY
+                         dx_filt[k]=dx_upd[k] that must not be zeroed)
+        P_smooth[k]   = P_upd[k] + C_k @ (P_smooth[k+1] - P_pred[k+1]) @ C_k.T
+    """
+    sd = result.get("_smoothing_data")
+    if sd is None:
+        raise ValueError(
+            "rts_smooth() requires result from run_pipeline(store_smoothing_data=True)"
+        )
+
+    F_list      = sd["F"]
+    P_pred_list = sd["P_pred"]
+    P_upd_list  = sd["P_upd"]
+    dx_upd_list = sd["dx_upd"]
+    p_pred_list = sd["pred_p"]
+    v_pred_list = sd["pred_v"]
+    q_pred_list = sd["pred_q"]
+
+    N = len(F_list)
+    dx_smooth = [None] * N
+    P_smooth  = [None] * N
+
+    # Base case: last step's smoothed correction IS the real correction
+    # that was applied there — nothing later to smooth against.
+    dx_smooth[-1] = dx_upd_list[-1].copy()
+    P_smooth[-1]  = P_upd_list[-1].copy()
+
+    for k in range(N - 2, -1, -1):
+        C_k = P_upd_list[k] @ F_list[k + 1].T @ np.linalg.solve(
+            P_pred_list[k + 1].T, np.eye(15)
+        ).T
+
+        dx_smooth[k] = dx_upd_list[k] + C_k @ dx_smooth[k + 1]
+        P_smooth[k]  = P_upd_list[k] + C_k @ (P_smooth[k + 1] - P_pred_list[k + 1]) @ C_k.T
+
+    # ── inject smoothed correction onto the INS-predicted nominal trajectory ─
+    R_earth = 6_371_000.0
+    smoothed_positions, smoothed_velocities, smoothed_headings = [], [], []
+    smoothed_uncertainty = []
+
+    for k in range(N):
+        dpos   = dx_smooth[k][0:3]
+        dvel   = dx_smooth[k][3:6]
+        dtheta = dx_smooth[k][6:9]
+
+        p_s = p_pred_list[k] + dpos
+        v_s = v_pred_list[k] + dvel
+
+        # Same small-angle quaternion injection convention as inject_corrections()
+        dq  = np.array([1.0, dtheta[0] / 2, dtheta[1] / 2, dtheta[2] / 2])
+        q_s = quat_normalize(quat_mult(q_pred_list[k], dq))
+
+        lat_out = lat0 + (p_s[1] / R_earth) * RAD2DEG
+        lon_out = lon0 + (p_s[0] / (R_earth * np.cos(lat0 * DEG2RAD))) * RAD2DEG
+        _, _, yaw_deg = rot_to_euler(quat_to_rot(q_s))
+
+        smoothed_positions.append([float(lat_out), float(lon_out)])
+        smoothed_velocities.append(float(np.linalg.norm(v_s[:2])))
+        smoothed_headings.append(float(yaw_deg))
+        smoothed_uncertainty.append(float(np.trace(P_smooth[k][0:3, 0:3])))
+
+    return {
+        "mode":           result["mode"] + "_rts_smoothed",
+        "outage_window":  result["outage_window"],
+        "timestamps":     result["timestamps"],
+        "positions":      smoothed_positions,
+        "velocities":     smoothed_velocities,
+        "headings":       smoothed_headings,
+        "covariances":    smoothed_uncertainty,
+        "gnss_status":    result["gnss_status"],  # status labels unchanged — same recorded epochs
+        "lat0":           lat0,
+        "lon0":           lon0,
+    }
+
+
+def export_smoothed_json(smoothed_result: dict, outdir: str = "exports") -> None:
+    """
+    Export the RTS-smoothed trajectory to a SEPARATE file from
+    fused_output.json. Never overwrites the real-time filter's output —
+    the dashboard should show both, honestly labeled:
+        fused_output.json          -> "Real-time estimate" (causal, no future info)
+        fused_output_smoothed.json -> "Offline smoothed estimate" (post-processed,
+                                       uses full recorded trajectory)
+    """
+    os.makedirs(outdir, exist_ok=True)
+    data = {
+        "timestamps":  smoothed_result["timestamps"],
+        "positions":   smoothed_result["positions"],
+        "velocities":  smoothed_result["velocities"],
+        "headings":    smoothed_result["headings"],
+        "gnss_status": smoothed_result["gnss_status"],
+        "uncertainty": smoothed_result["covariances"],
+        "mode":        smoothed_result["mode"],
+        "outage_window": smoothed_result["outage_window"],
+        "smoothing":   "rts",   # explicit flag — never ambiguous in the JSON itself
+    }
+    path = os.path.join(outdir, "fused_output_smoothed.json")
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"  Exported: {path}")
 
 
 # ── reference trajectory extraction ──────────────────────────────────────────
@@ -694,12 +915,12 @@ def evaluate_error(result: dict, v_df) -> dict:
 if __name__ == "__main__":
     import sys
     sys.path.insert(0, os.path.dirname(__file__))
-    from data_loader import load_smartphone, load_vehicle, get_dataset_root
+    from data_loader import load_smartphone, load_vehicle
     import matplotlib.pyplot as plt
 
-    dataset_root = get_dataset_root()
     BASE = os.path.join(
-        dataset_root, "Synchronised V abd S datasets",
+        os.path.dirname(__file__), "..",
+        "IO-VNBD", "Synchronised V abd S datasets",
         "Categorised IOVNB Dataset", "S (Driver A)", "S3b"
     )
 
