@@ -1186,12 +1186,39 @@ h2.sec-title {
   color: var(--ink);
 }
 
-/* ── CANVAS AREA ─────────────────────────────── */
+/* ── CANVAS & LEAFLET MAP AREA ───────────────── */
 .portal-canvas-wrap {
   position: relative;
   flex-grow: 1;
   background: #0A0A0B;
   overflow: hidden;
+}
+
+.portal-leaflet-map {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  background: #0A0A0B;
+}
+
+.leaflet-container {
+  background: #0A0A0B !important;
+  font-family: inherit;
+}
+
+.leaflet-control-attribution {
+  background: rgba(10, 10, 11, 0.8) !important;
+  color: var(--muted) !important;
+  font-size: 10px !important;
+  border-radius: 4px;
+  margin: 8px !important;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.leaflet-control-attribution a {
+  color: var(--cyan) !important;
 }
 
 .grid-overlay {
@@ -1203,13 +1230,87 @@ h2.sec-title {
     linear-gradient(var(--line) 1px, transparent 1px),
     linear-gradient(90deg, var(--line) 1px, transparent 1px);
   background-size: 100px 100px;
-  opacity: 0.15;
+  opacity: 0.10;
 }
 
 #mainCanvas {
   position: absolute;
   inset: 0;
   z-index: 2;
+  pointer-events: none;
+}
+
+/* ── MAP HUD CONTROLS ────────────────────────── */
+.map-hud-controls {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.map-hud-group {
+  display: flex;
+  background: rgba(19, 19, 21, 0.85);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.map-hud-btn {
+  background: transparent;
+  border: none;
+  color: var(--ink);
+  font-family: var(--f-d);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease);
+  border-right: 1px solid var(--line);
+}
+.map-hud-btn:last-child {
+  border-right: none;
+}
+
+.map-hud-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.map-hud-btn.active {
+  background: rgba(45, 212, 191, 0.15);
+  color: var(--cyan);
+}
+
+.map-hud-btn.active .hud-dot {
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+}
+
+.hud-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: all var(--dur-fast);
+}
+
+.map-hud-icon-btn {
+  padding: 6px 10px;
+  font-size: 13px;
+  min-width: 32px;
+  justify-content: center;
 }
 
 /* ── BOTTOM BAR & TIMELINE ───────────────────── */

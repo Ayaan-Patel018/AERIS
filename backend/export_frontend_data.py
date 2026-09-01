@@ -95,6 +95,8 @@ def build_points(master_times, source_times, source_positions,
         point = {
             "x": round(float(x), 3),
             "y": round(float(y), 3),
+            "lat": round(float(lat), 7),
+            "lon": round(float(lon), 7),
             "t": round(float(t / total_duration), 6),
         }
 
