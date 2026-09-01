@@ -38,6 +38,14 @@ We measure improvement two ways, not one — overall AND specifically during the
 
 We validate on two independent drives — the one we develop against (S3b) and a second, completely different one we never tune on (S1). Both showed real, large, honestly-measured improvement.
 
+## If asked "why does offline matter if it can't improve the real-time line"
+
+This is the sharpest, most likely question — have this exact answer ready, don't improvise it live:
+
+> "You're right that the real-time line can't be improved by information that hasn't happened yet — that's a hard physical limit, not something our engineering could fix. What the offline pass actually proves is that our underlying estimator — the Kalman filter, the physics constraints, the GNSS classifier — is fundamentally accurate: given the complete picture, it converges very closely to the truth. That tells us the real-time system's limitation is purely about not knowing the future, not about the approach being wrong. And there's a real path to bring part of this benefit into near-real-time — a fixed-lag smoother that looks only a few seconds ahead instead of the whole drive — which is a natural next step beyond this MVP."
+
+Three things this answer does: admits the real constraint honestly, explains what was actually learned, shows you know the real engineering frontier beyond the demo.
+
 ## If asked "why not just add more AI/ML"
 
 The honest, strong answer: our intelligent layer is a rule-based GNSS reliability classifier plus the Kalman filter, which is the mathematically optimal estimator for this exact fusion problem. RTS smoothing is a natural, well-understood extension of the same statistical framework — not a new unvalidated model bolted on days before demo. We chose techniques we could fully verify and defend in the time available, over ones that might look more impressive but that we couldn't rigorously validate.

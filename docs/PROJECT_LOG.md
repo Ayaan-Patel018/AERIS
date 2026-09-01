@@ -240,3 +240,18 @@ Same order of magnitude, not identical (expected/good). "Not cherry-picked" evid
 **Decided:** RTS + ZARU results are final and strong enough that Mahalanobis-gated NHC (the conditional Module 3) is **not being pursued** — diminishing-returns risk of touching the real-time filter this close to demo isn't justified given how much RTS+ZARU already achieved. Backend improvement work is complete.
 
 **Open:** Wire `fused_output_smoothed.json` into the frontend as a separate, honestly-labeled layer (not started — next actual task).
+
+---
+
+## 2026-09-01 (final) — Robustness verified, frontend wiring built, team briefs dispatched
+**Did:**
+- **Verified GPT's robustness checklist for real**, not just asserted: built a synthetic-data smoke test (same factory pattern as the real test suite) exercising the full RTS+ZARU path end to end. Results: zero NaN/Inf anywhere, zero negative uncertainty, covariance asymmetry at machine-epsilon level (1.98e-16), PSD holds (min eigenvalue 0.0, never negative). Added explicit covariance symmetrization anyway as cheap insurance for the much longer real sequences.
+- **User independently re-ran the real 161-test suite** — confirmed still 161/161 PASS after all RTS/ZARU changes. Committed.
+- **Extended `export_frontend_data.py`** to also produce `smoothed_output.json` (the RTS+ZARU offline result, in the same real, already-proven-correct frontend point-array shape) as a genuine 4th data file — never merged with or replacing `fused_output.json`.
+- **Filed `docs/FRONTEND_AGENT_PROMPT.md`** — self-contained task list for Aryan's AI agent: wire the new 4th layer (labeled "Offline Smoothed (Analysis)," with an explicit "not available to a live system" caption), fix ChartsPanel visibility, fix layer-toggle/button coupling bugs, regression-test the earlier GNSS-status fix.
+- **Filed `docs/ANURAG_TESTING_BRIEF.md`** — what to independently verify (test suite, evaluation reproducibility, deployment size/build checks), plus the "why does an audit matter" and "why does offline matter" talking points.
+- **Added the exact "why offline if real-time can't improve" Q&A to `docs/RTS_TEAM_BRIEFING.md`** — this was asked directly this session and is very likely to come up from a judge; answer is now filed word-for-word, not left to improvisation.
+
+**Decided:** The real-time (orange) trajectory is never modified by any of this work — it stays exactly as validated. The smoothed output is strictly additive, a 4th layer, always separately labeled. This is now consistently enforced across backend export, frontend task instructions, and both teammates' briefings.
+
+**Open:** Aryan's frontend agent work (Task 1-4 in FRONTEND_AGENT_PROMPT.md) — not started. Anurag's independent verification — not started. Once both land: full demo rehearsal.
