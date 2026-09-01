@@ -27,7 +27,7 @@ export const MetricsPanel: React.FC = () => {
         </div>
         <div className="sb-stat-row">
           <span className="sb-k">VEL ERROR</span>
-          <span className="sb-v">0.4 m/s</span>
+          <span className="sb-v">— (no ref)</span>
         </div>
         <div className="sb-stat-row">
           <span className="sb-k">CONFIDENCE</span>
@@ -38,7 +38,7 @@ export const MetricsPanel: React.FC = () => {
         </div>
         <div className="sb-stat-row" style={{ marginTop: '8px' }}>
           <span className="sb-k">AI ESTIMATOR</span>
-          <span className="sb-v ok">ACTIVE</span>
+          <span className="sb-v ok">ES-EKF</span>
         </div>
         <div className="sb-stat-row">
           <span className="sb-k">UPDATE RATE</span>
