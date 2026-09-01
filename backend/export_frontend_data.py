@@ -13,7 +13,7 @@ in frontend/src/data/ shape, so both schemas coexist without conflict.
 
 Fixes applied vs. the current frontend mock data:
   1. Correct shape: {x, y, t} per point, in ENU metres (not lat/lon degrees).
-  2. All three arrays aligned to the SAME time grid (fused_output's, since it's
+  2. All arrays aligned to the SAME time grid (fused_output's, since it's
      the most complete) and the SAME length — fixes the index-misalignment bug
      where gt.length was used to index into gnss[] and fused[] as if they were
      the same length.
@@ -22,13 +22,22 @@ Fixes applied vs. the current frontend mock data:
      useGNSSStatus.ts can read real values instead of a sine wave.
   4. No hardcoded outage-window fractions anywhere — outage state is read
      directly from each point's real `status` field.
+  5. NEW: also exports smoothed_output.json (RTS+ZARU offline pass) — a
+     genuinely separate, real result. Never merges into or replaces
+     fused_output.json — the real-time and offline outputs stay two
+     distinct files, matching the locked presentation framing in
+     ARCHITECTURE.md Part VI.
 
 Usage:
     python export_frontend_data.py
-Reads:  backend/exports/evaluation/outage_60s/*.json  (frozen, already tested)
-Writes: backend/exports/frontend_data/{ground_truth,gnss_only,fused_output}.json
-        (copy these 3 files into frontend/src/data/, replacing the mock ones —
-         filenames match exactly what useTrajectoryData.ts already imports)
+Reads:  backend/exports/evaluation/outage_60s/*.json                    (real-time, frozen)
+        backend/exports/evaluation/rts_comparison/s3b/rts_plus_zaru/
+            fused_output_smoothed.json                                   (offline RTS+ZARU)
+Writes: backend/exports/frontend_data/{ground_truth,gnss_only,fused_output,smoothed_output}.json
+        (copy all 4 files into frontend/src/data/, replacing the mock ones —
+         filenames match exactly what useTrajectoryData.ts imports; smoothed_output.json
+         is new — frontend needs one small addition to load and display it, see
+         docs/FRONTEND_AGENT_PROMPT.md)
 """
 
 import os
@@ -40,6 +49,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 from ins_ekf import latlon_to_enu
 
 SRC_DIR = os.path.join(os.path.dirname(__file__), "exports", "evaluation", "outage_60s")
+SMOOTHED_SRC = os.path.join(
+    os.path.dirname(__file__), "exports", "evaluation",
+    "rts_comparison", "s3b", "rts_plus_zaru", "fused_output_smoothed.json"
+)
 OUT_DIR = os.path.join(os.path.dirname(__file__), "exports", "frontend_data")
 
 
@@ -137,12 +150,36 @@ def main():
         }
     )
 
+    # ── smoothed_output.json — offline RTS+ZARU pass, NEW, real, separate ────
+    smoothed_points = None
+    if os.path.exists(SMOOTHED_SRC):
+        with open(SMOOTHED_SRC) as f:
+            smoothed = json.load(f)
+        smoothed_points = build_points(
+            master_times, smoothed["timestamps"], smoothed["positions"],
+            lat0, lon0, total_duration,
+            extra_fields={
+                "status":      smoothed["gnss_status"],
+                "uncertainty": [round(float(u), 3) for u in smoothed["uncertainty"]],
+                "velocity":    [round(float(v), 3) for v in smoothed["velocities"]],
+                "heading":     [round(float(h), 2) for h in smoothed["headings"]],
+            }
+        )
+    else:
+        print(f"\n  WARNING: {SMOOTHED_SRC} not found — run "
+              f"'python rts_evaluation.py' first to generate it. "
+              f"Skipping smoothed_output.json this run.")
+
     # ── write ────────────────────────────────────────────────────────────
-    for name, data in [
+    outputs = [
         ("ground_truth.json", gt_points),
         ("gnss_only.json",    gnss_points),
         ("fused_output.json", fused_points),
-    ]:
+    ]
+    if smoothed_points is not None:
+        outputs.append(("smoothed_output.json", smoothed_points))
+
+    for name, data in outputs:
         path = os.path.join(OUT_DIR, name)
         with open(path, "w") as f:
             json.dump(data, f)
@@ -157,7 +194,8 @@ def main():
         print("Note: frontend no longer needs this as a hardcoded constant —")
         print("      status is now embedded per-point in fused_output.json.")
 
-    print(f"\nDone. Copy the 3 files from {OUT_DIR} into frontend/src/data/, replacing the existing ones.")
+    print(f"\nDone. Copy the {'4' if smoothed_points is not None else '3'} files from {OUT_DIR} "
+          f"into frontend/src/data/, replacing the existing ones.")
 
 
 if __name__ == "__main__":
