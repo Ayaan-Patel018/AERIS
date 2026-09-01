@@ -1,12 +1,11 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { PlaybackControls } from './PlaybackControls';
 import { TimelineSlider } from './TimelineSlider';
 import { ChartsPanel } from './ChartsPanel';
 import { useDashboardContext } from '../../context/DashboardContext';
 
 export const BottomBar: React.FC = () => {
-  const [chartsOpen, setChartsOpen] = useState(false);
-  const { speed, setSpeed } = useDashboardContext();
+  const { speed, setSpeed, chartsOpen, setChartsOpen } = useDashboardContext();
 
   const cycleSpeed = () => {
     const opts = [0.5, 1, 2, 4];

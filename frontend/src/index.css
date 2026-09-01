@@ -472,6 +472,13 @@ h2.sec-title {
   right: 0;
   bottom: var(--bottombar-h);
   display: flex;
+  transition: bottom var(--dur-slow) var(--ease);
+}
+
+/* When charts panel is open, shrink the canvas area so charts get
+   dedicated space instead of overlapping the map */
+.portal-layout.charts-open {
+  bottom: calc(var(--bottombar-h) + 160px);
 }
 
 .sidebar {
@@ -674,6 +681,16 @@ h2.sec-title {
 
 .layer-toggle.on.or::after {
   background: var(--orange);
+}
+
+/* Purple/violet toggle — used for the Offline Smoothed (Analysis) layer */
+.layer-toggle.on.pu {
+  background: rgba(167, 139, 250, .2);
+  border-color: #A78BFA;
+}
+
+.layer-toggle.on.pu::after {
+  background: #A78BFA;
 }
 
 /* Modals */
@@ -1186,7 +1203,7 @@ h2.sec-title {
   color: var(--ink);
 }
 
-/* ── CANVAS AREA ─────────────────────────────── */
+/* ── CANVAS AREA ────────────────────────────── */
 .portal-canvas-wrap {
   position: relative;
   flex-grow: 1;
@@ -1194,22 +1211,98 @@ h2.sec-title {
   overflow: hidden;
 }
 
+/* Grid overlay sits above Leaflet tiles (z=0) but below canvas (z=10) */
 .grid-overlay {
   position: absolute;
   inset: 0;
-  z-index: 1;
+  z-index: 5;
   pointer-events: none;
   background-image:
     linear-gradient(var(--line) 1px, transparent 1px),
     linear-gradient(90deg, var(--line) 1px, transparent 1px);
   background-size: 100px 100px;
-  opacity: 0.15;
+  opacity: 0.06; /* lighter — tiles provide context now */
 }
 
-#mainCanvas {
+/* ── MAP HUD ──────────────────────────────── */
+.map-hud {
   position: absolute;
-  inset: 0;
-  z-index: 2;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: all;
+}
+
+/* Tile switcher row */
+.hud-tiles {
+  display: flex;
+  gap: 2px;
+  background: rgba(10,10,11,0.75);
+  border: 1px solid var(--line);
+  padding: 3px;
+  backdrop-filter: blur(6px);
+}
+
+.hud-tile-btn {
+  font-family: var(--f-m);
+  font-size: 8px;
+  letter-spacing: .1em;
+  padding: 5px 9px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color var(--dur-fast), background var(--dur-fast);
+}
+
+.hud-tile-btn.active {
+  background: var(--line);
+  color: var(--ink);
+}
+
+.hud-tile-btn:hover:not(.active) {
+  color: var(--ink);
+}
+
+/* Generic HUD icon button */
+.hud-btn {
+  width: 32px;
+  height: 32px;
+  background: rgba(10,10,11,0.75);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  font-family: var(--f-m);
+  transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast);
+  backdrop-filter: blur(6px);
+}
+
+.hud-btn:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.hud-btn.active {
+  border-color: var(--orange);
+  color: var(--orange);
+  background: rgba(240,128,30,0.12);
+}
+
+/* Leaflet attribution — style to match the dark theme */
+.leaflet-control-attribution {
+  background: rgba(10,10,11,0.65) !important;
+  color: rgba(138,138,147,0.7) !important;
+  font-size: 9px !important;
+  backdrop-filter: blur(4px);
+}
+.leaflet-control-attribution a {
+  color: rgba(138,138,147,0.9) !important;
 }
 
 /* ── BOTTOM BAR & TIMELINE ───────────────────── */
@@ -1226,6 +1319,24 @@ h2.sec-title {
   padding: 0 20px;
   z-index: 500;
   gap: 20px;
+}
+
+/* Map canvas grab cursor while dragging */
+.portal-canvas-wrap canvas[data-dragging] {
+  cursor: grabbing !important;
+}
+
+/* Hint label at bottom of map */
+.map-hint {
+  position: absolute;
+  bottom: 8px;
+  right: 12px;
+  font-family: var(--f-m);
+  font-size: 8px;
+  letter-spacing: .06em;
+  color: rgba(138,138,147,0.45);
+  pointer-events: none;
+  user-select: none;
 }
 
 .play-btn {
@@ -1322,10 +1433,11 @@ h2.sec-title {
   bottom: var(--bottombar-h);
   left: var(--sidebar-w);
   right: 0;
-  height: 120px;
+  height: 160px;
   background: var(--panel);
   border-top: 1px solid var(--line);
   display: flex;
+  overflow: hidden;
   transform: translateY(100%);
   transition: transform var(--dur-slow) var(--ease);
   z-index: 400;
@@ -1358,6 +1470,7 @@ h2.sec-title {
 .chart-svg {
   width: 100%;
   flex-grow: 1;
+  /* overflow: visible is safe here — Y values are clamped in pts2path() */
   overflow: visible;
 }
 

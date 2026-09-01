@@ -5,7 +5,10 @@ interface Layers {
   gt: boolean;
   gnss: boolean;
   fused: boolean;
+  /** Offline RTS+ZARU post-processed trajectory — analysis only, NOT a live capability */
+  smoothed: boolean;
 }
+
 
 interface DashboardContextType {
   isPlaying: boolean;
@@ -24,6 +27,10 @@ interface DashboardContextType {
   layers: Layers;
   setLayers: React.Dispatch<React.SetStateAction<Layers>>;
   resetSimulation: () => void;
+  /** Whether the charts panel is open — exposed so the layout can shrink the
+   *  canvas area and give charts dedicated space (no overlap). */
+  chartsOpen: boolean;
+  setChartsOpen: (val: boolean) => void;
 }
 
 const DashboardContext = createContext<DashboardContextType | undefined>(undefined);
@@ -32,9 +39,10 @@ export const DashboardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [speed, setSpeed] = useState(1);
+  const [chartsOpen, setChartsOpen] = useState(false);
   const [simulateOutage, setSimulateOutageRaw] = useState(false);
   const [manualOutageStart, setManualOutageStart] = useState<number | null>(null);
-  const [layers, setLayers] = useState<Layers>({ gt: true, gnss: true, fused: true });
+  const [layers, setLayers] = useState<Layers>({ gt: true, gnss: true, fused: true, smoothed: false });
 
   const setSimulateOutage = (val: boolean) => {
     setSimulateOutageRaw(val);
@@ -56,7 +64,8 @@ export const DashboardProvider: React.FC<{ children: ReactNode }> = ({ children 
       simulateOutage, setSimulateOutage,
       manualOutageStart,
       layers, setLayers,
-      resetSimulation
+      resetSimulation,
+      chartsOpen, setChartsOpen
     }}>
       {children}
     </DashboardContext.Provider>

@@ -9,17 +9,17 @@ export const Hero: React.FC = () => {
     if (!cv) return;
     const ctx = cv.getContext('2d');
     if (!ctx) return;
-    
+
     let w: number, h: number;
-    const pts: {x:number, y:number, vx:number, vy:number}[] = [];
-    
+    const pts: { x: number, y: number, vx: number, vy: number }[] = [];
+
     const resize = () => {
       w = cv.width = cv.offsetWidth;
       h = cv.height = cv.offsetHeight;
     };
     resize();
     window.addEventListener('resize', resize);
-    
+
     for (let i = 0; i < 40; i++) {
       pts.push({
         x: Math.random() * 100,
@@ -86,15 +86,15 @@ export const Hero: React.FC = () => {
         <div className="hero-vis">
           <div className="hero-video-box rev d3 in">
             <div className="b-dot bl"></div><div className="b-dot br"></div>
-            <video 
-               src={homeVideo} 
-               autoPlay 
-               loop 
-               muted 
-               playsInline 
-               disablePictureInPicture
-               className="hero-video"
-             />
+            <video
+              src={homeVideo}
+              autoPlay
+              loop
+              muted
+              playsInline
+              disablePictureInPicture
+              className="hero-video"
+            />
           </div>
           <div className="hero-telemetry rev d4 in">
           </div>
