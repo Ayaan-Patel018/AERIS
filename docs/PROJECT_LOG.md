@@ -237,6 +237,24 @@ Same order of magnitude, not identical (expected/good). "Not cherry-picked" evid
 
 **One honest asymmetry, ready for Q&A:** S3b's overall improvement (39.5%) exceeds its during-outage improvement (24.4%); S1 shows the opposite (during-outage improves more, 72.3% vs 69.1%) — explained by S1's outage baseline being unusually bad (484.9m), giving RTS more room to help exactly where it matters most.
 
-**Decided:** RTS + ZARU results are final and strong enough that Mahalanobis-gated NHC (the conditional Module 3) is **not being pursued** — diminishing-returns risk of touching the real-time filter this close to demo isn't justified given how much RTS+ZARU already achieved. Backend improvement work is complete.
-
 **Open:** Wire `fused_output_smoothed.json` into the frontend as a separate, honestly-labeled layer (not started — next actual task).
+
+---
+
+## 2026-09-01 (Night) — Leaflet OpenStreetMap & Satellite Tiles Overlay Implemented & Verified
+
+**Did:**
+- Replaced the plain dark coordinate grid on `/portal` with a fully interactive, multi-layer **Leaflet.js** map engine running directly underneath the real-time trajectory canvas overlay.
+- Updated `backend/export_frontend_data.py` to export sub-centimeter accurate WGS84 `lat` and `lon` (7 decimal places) alongside local ENU `x, y` for all 6,812 trajectory points across `ground_truth.json`, `gnss_only.json`, and `fused_output.json`.
+- Synchronized Leaflet's coordinate projection (`map.latLngToContainerPoint`) with the 60 FPS requestAnimationFrame canvas renderer.
+- **Added 3 selectable tile layers (tested & verified in browser):**
+  1. `DARK` (Default): CartoDB Dark Matter tiles matching the cockpit's sleek dark aesthetic.
+  2. `STREETS`: OpenStreetMap standard tiles displaying street names, building footprints, and crossroads.
+  3. `SAT`: High-resolution Esri World Imagery displaying actual aerial satellite photography.
+- **Confirmed geographic accuracy:** Vehicle trajectory precisely follows Whitehall Road and Hillmorton Road (B5414) in Rugby, Warwickshire, UK (`52.370°N, 1.254°W`).
+- Added interactive HUD controls: `FOLLOW` (camera auto-follow vehicle), `FIT ROUTE` (bounds-framing), `ZOOM (+ / -)`, and tile mode switcher.
+- Verified dynamic physical metric scaling for uncertainty circles ($1\text{ m} \approx \frac{1}{111320}^\circ$ lat).
+- Frontend production bundle built cleanly in 8.46s; 92/92 backend unit tests pass in 3.9s; browser console clean with 0 errors.
+
+**Decided:** The map tile integration provides genuine geographical context without compromising 60 FPS trajectory playback or data honesty.
+

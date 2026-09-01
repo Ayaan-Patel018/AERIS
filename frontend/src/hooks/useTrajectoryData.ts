@@ -6,6 +6,8 @@ import { useDashboardContext } from '../context/DashboardContext';
 export interface TrajectoryPoint {
   x: number;
   y: number;
+  lat?: number;
+  lon?: number;
   t: number;
   // Present only on fused_output points (real EKF data, see
   // backend/export_frontend_data.py):

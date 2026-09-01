@@ -23,18 +23,18 @@ import os, sys, json, argparse
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from data_loader import load_smartphone, load_vehicle
+from data_loader import load_smartphone, load_vehicle, get_dataset_root
 from ins_ekf import (run_pipeline, rts_smooth, export_smoothed_json,
                      evaluate_error, latlon_to_enu)
 
+dataset_root = get_dataset_root()
+
 BASE_S3b = os.path.join(
-    os.path.dirname(__file__), "..",
-    "IO-VNBD", "Synchronised V abd S datasets",
+    dataset_root, "Synchronised V abd S datasets",
     "Categorised IOVNB Dataset", "S (Driver A)", "S3b"
 )
 BASE_S1 = os.path.join(
-    os.path.dirname(__file__), "..",
-    "IO-VNBD", "Synchronised V abd S datasets",
+    dataset_root, "Synchronised V abd S datasets",
     "Categorised IOVNB Dataset", "S (Driver A)", "S1"
 )
 
