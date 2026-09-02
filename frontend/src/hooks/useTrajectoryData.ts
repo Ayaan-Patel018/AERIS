@@ -1,6 +1,7 @@
 import groundTruthData from '../data/ground_truth.json';
 import gnssOnlyData from '../data/gnss_only.json';
 import fusedOutputData from '../data/fused_output.json';
+import smoothedOutputData from '../data/smoothed_output.json';
 import { useDashboardContext } from '../context/DashboardContext';
 
 export interface TrajectoryPoint {
@@ -22,6 +23,7 @@ export const useTrajectoryData = () => {
   const gt = groundTruthData as TrajectoryPoint[];
   const gnss = gnssOnlyData as TrajectoryPoint[];
   const fused = fusedOutputData as TrajectoryPoint[];
+  const smoothed = smoothedOutputData as TrajectoryPoint[];
 
   // All three arrays are now the SAME length and time-aligned by
   // export_frontend_data.py (aligned to fused_output's time grid),
@@ -33,8 +35,10 @@ export const useTrajectoryData = () => {
     gt,
     gnss,
     fused,
+    smoothed,
     currentIndex,
     currentGnssPos: gnss[currentIndex],
     currentFusedPos: fused[currentIndex],
+    currentSmoothedPos: smoothed[currentIndex],
   };
 };

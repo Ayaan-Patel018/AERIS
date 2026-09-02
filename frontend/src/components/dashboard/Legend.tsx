@@ -45,6 +45,17 @@ export const Legend: React.FC = () => {
             onClick={() => toggleLayer('fused')}
           ></div>
         </div>
+        <div className="sb-stat-row">
+          <span className="sb-k" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ width: '8px', height: '8px', background: '#A855F7' }}></span>
+            RTS SMOOTHED
+          </span>
+          <div 
+            className={`layer-toggle ${layers.smoothed ? 'on' : ''}`} 
+            style={layers.smoothed ? { background: '#A855F7', borderColor: '#A855F7' } : {}}
+            onClick={() => toggleLayer('smoothed')}
+          ></div>
+        </div>
       </div>
     </div>
   );
