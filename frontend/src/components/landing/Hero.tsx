@@ -84,6 +84,7 @@ export const Hero: React.FC = () => {
           </div>
         </div>
         <div className="hero-vis">
+          <div className="hero-top-spacer"></div>
           <div className="hero-video-box rev d3 in">
             <div className="b-dot bl"></div><div className="b-dot br"></div>
             <video 

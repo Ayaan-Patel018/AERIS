@@ -40,7 +40,7 @@ export const MapArea: React.FC = () => {
   const [tileStyle, setTileStyle] = useState<TileStyle>('dark');
 
   const { layers } = useDashboardContext();
-  const { gt, gnss, fused, currentIndex, currentGnssPos, currentFusedPos } = useTrajectoryData();
+  const { gt, gnss, fused, smoothed, currentIndex, currentGnssPos, currentFusedPos, currentSmoothedPos } = useTrajectoryData();
   const { isOutage, aerisError, gnssError } = useGNSSStatus();
 
   // ── Calculate trajectory bounding box for initial fitting ──────────────
@@ -180,15 +180,44 @@ export const MapArea: React.FC = () => {
       }
     }
 
+    // 4. Draw Smoothed RTS Trajectory (Purple #A855F7)
+    if (layers.smoothed && smoothed && smoothed.length > 1) {
+      const smoothedPixels: { x: number; y: number }[] = [];
+      const endIdx = Math.min(currentIndex, smoothed.length - 1);
+      for (let i = 0; i <= endIdx; i++) {
+        if (smoothed[i].lat !== undefined && smoothed[i].lon !== undefined) {
+          smoothedPixels.push(toPixel(smoothed[i].lat!, smoothed[i].lon!));
+        }
+      }
+      drawTrajectory(ctx, smoothedPixels, '#A855F7', 3.0, false);
+    }
+
     // Determine current position
-    const curPos = (layers.fused ? currentFusedPos : currentGnssPos) || currentFusedPos;
-    if (!curPos || curPos.lat === undefined || curPos.lon === undefined) return;
+    let curPos = null;
+    let vehicleColor = '#2DD4BF';
+
+    if (layers.smoothed && currentSmoothedPos && currentSmoothedPos.lat !== undefined && currentSmoothedPos.lon !== undefined) {
+      curPos = currentSmoothedPos;
+      vehicleColor = '#A855F7';
+    } else if (layers.fused && currentFusedPos && currentFusedPos.lat !== undefined && currentFusedPos.lon !== undefined) {
+      curPos = currentFusedPos;
+      vehicleColor = isOutage ? '#F0801E' : '#2DD4BF';
+    } else if (layers.gnss && currentGnssPos && currentGnssPos.lat !== undefined && currentGnssPos.lon !== undefined) {
+      curPos = currentGnssPos;
+      vehicleColor = isOutage ? '#E5484D' : '#2DD4BF';
+    }
+
+    if (!curPos) return;
 
     const curPt = toPixel(curPos.lat, curPos.lon);
 
     // Calculate heading from recent movement
     if (currentIndex > 0) {
-      const prevPos = (layers.fused ? fused[currentIndex - 1] : gnss[currentIndex - 1]) || gt[currentIndex - 1];
+      let prevPos = null;
+      if (layers.smoothed) prevPos = smoothed[currentIndex - 1];
+      else if (layers.fused) prevPos = fused[currentIndex - 1];
+      else if (layers.gnss) prevPos = gnss[currentIndex - 1];
+      
       if (prevPos && prevPos.lat !== undefined && prevPos.lon !== undefined) {
         const prevPt = toPixel(prevPos.lat, prevPos.lon);
         const dx = curPt.x - prevPt.x;
@@ -223,12 +252,8 @@ export const MapArea: React.FC = () => {
     }
 
     // Draw Vehicle Marker
-    const vehicleColor = (isOutage && layers.fused)
-      ? '#F0801E'
-      : (isOutage && !layers.fused ? '#E5484D' : '#2DD4BF');
-
     drawVehicleMarker(ctx, curPt.x, curPt.y, heading, vehicleColor);
-  }, [gt, gnss, fused, currentIndex, currentGnssPos, currentFusedPos, layers, isOutage, aerisError, gnssError]);
+  }, [gt, gnss, fused, smoothed, currentIndex, currentGnssPos, currentFusedPos, currentSmoothedPos, layers, isOutage, aerisError, gnssError]);
 
   // ── Sync canvas whenever map moves, zooms, or renders ───────────────────
   useEffect(() => {
@@ -250,14 +275,18 @@ export const MapArea: React.FC = () => {
   useEffect(() => {
     const map = mapRef.current;
     if (map && autoFollow) {
-      const pos = (layers.fused ? currentFusedPos : currentGnssPos) || currentFusedPos;
+      let pos = null;
+      if (layers.smoothed) pos = currentSmoothedPos;
+      else if (layers.fused) pos = currentFusedPos;
+      else if (layers.gnss) pos = currentGnssPos;
+
       if (pos && pos.lat !== undefined && pos.lon !== undefined) {
         // Keep camera centered on vehicle during playback
         map.setView([pos.lat, pos.lon], map.getZoom(), { animate: false });
       }
     }
     renderCanvas();
-  }, [currentIndex, autoFollow, currentFusedPos, currentGnssPos, layers, renderCanvas]);
+  }, [currentIndex, autoFollow, currentFusedPos, currentGnssPos, currentSmoothedPos, layers, renderCanvas]);
 
   // ── Container Resize Handler ────────────────────────────────────────────
   useEffect(() => {
@@ -284,7 +313,11 @@ export const MapArea: React.FC = () => {
     const next = !autoFollow;
     setAutoFollow(next);
     if (next && mapRef.current) {
-      const pos = (layers.fused ? currentFusedPos : currentGnssPos) || currentFusedPos;
+      let pos = null;
+      if (layers.smoothed) pos = currentSmoothedPos;
+      else if (layers.fused) pos = currentFusedPos;
+      else if (layers.gnss) pos = currentGnssPos;
+
       if (pos && pos.lat !== undefined && pos.lon !== undefined) {
         mapRef.current.panTo([pos.lat, pos.lon], { animate: true });
       }

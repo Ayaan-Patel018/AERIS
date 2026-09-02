@@ -45,6 +45,22 @@ export const Legend: React.FC = () => {
             onClick={() => toggleLayer('fused')}
           ></div>
         </div>
+        <div className="sb-stat-row">
+          <span className="sb-k" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ width: '8px', height: '8px', background: '#A855F7' }}></span>
+            RTS SMOOTHED
+          </span>
+          <div 
+            className={`layer-toggle ${layers.smoothed ? 'on' : ''}`} 
+            style={layers.smoothed ? { background: '#A855F7', borderColor: '#A855F7' } : {}}
+            onClick={() => toggleLayer('smoothed')}
+          ></div>
+        </div>
+        {layers.smoothed && (
+          <div className="sb-caption" style={{ fontSize: '10px', color: '#888', marginTop: '4px', marginBottom: '8px' }}>
+            Post-processed using the complete recorded drive — not available to a live system.
+          </div>
+        )}
       </div>
     </div>
   );
