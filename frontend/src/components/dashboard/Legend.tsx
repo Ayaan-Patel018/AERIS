@@ -56,6 +56,11 @@ export const Legend: React.FC = () => {
             onClick={() => toggleLayer('smoothed')}
           ></div>
         </div>
+        {layers.smoothed && (
+          <div className="sb-caption" style={{ fontSize: '10px', color: '#888', marginTop: '4px', marginBottom: '8px' }}>
+            Post-processed using the complete recorded drive — not available to a live system.
+          </div>
+        )}
       </div>
     </div>
   );
