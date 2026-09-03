@@ -1,31 +1,30 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import L from 'leaflet';
 import { useDashboardContext } from '../../context/DashboardContext';
-import { useTrajectoryData } from '../../hooks/useTrajectoryData';
+import { useTrajectoryData, type TrajectoryPoint } from '../../hooks/useTrajectoryData';
 import { useGNSSStatus } from '../../hooks/useGNSSStatus';
 import { drawTrajectory } from './TrajectoryLayer';
 import { drawVehicleMarker } from './VehicleMarker';
 import { drawUncertaintyCircle } from './UncertaintyCircle';
-import { LocateFixed, Maximize2, Plus, Minus, Compass } from 'lucide-react';
 
 type TileStyle = 'dark' | 'streets' | 'satellite';
 
 const TILE_LAYERS: Record<TileStyle, { url: string; attribution: string; maxZoom: number; subdomains?: string[] }> = {
   dark: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    maxZoom: 20,
-    subdomains: ['a', 'b', 'c', 'd'],
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19,
+    subdomains: ['a', 'b', 'c'],
   },
   streets: {
     url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    attribution: '&copy; OpenStreetMap contributors',
     maxZoom: 19,
     subdomains: ['a', 'b', 'c'],
   },
   satellite: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+    attribution: 'Tiles &copy; Esri',
     maxZoom: 19,
   },
 };
@@ -35,7 +34,11 @@ export const MapArea: React.FC = () => {
   const mapRef = useRef<L.Map | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const lastHeadingRef = useRef<number>(0);
+  const animFrameRef = useRef<number | null>(null);
+
+  const lastFusedHeadingRef = useRef<number>(0);
+  const lastGnssHeadingRef = useRef<number>(0);
+  const lastSmoothedHeadingRef = useRef<number>(0);
 
   const [autoFollow, setAutoFollow] = useState<boolean>(true);
   const [tileStyle, setTileStyle] = useState<TileStyle>('dark');
@@ -44,44 +47,34 @@ export const MapArea: React.FC = () => {
   const { gt, gnss, fused, smoothed, currentIndex, currentGnssPos, currentFusedPos, currentSmoothedPos } = useTrajectoryData();
   const { isOutage, aerisError, gnssError } = useGNSSStatus();
 
-  // ── Calculate trajectory bounding box for initial fitting ──────────────
+  // Trajectory geographical bounding box
   const getTrajectoryBounds = useCallback((): L.LatLngBounds | null => {
-    let minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
-    let hasPoints = false;
-    for (let i = 0; i < gt.length; i++) {
-      const p = gt[i];
-      if (p.lat !== undefined && p.lon !== undefined) {
-        if (p.lat < minLat) minLat = p.lat;
-        if (p.lat > maxLat) maxLat = p.lat;
-        if (p.lon < minLon) minLon = p.lon;
-        if (p.lon > maxLon) maxLon = p.lon;
-        hasPoints = true;
-      }
-    }
-    if (!hasPoints) return null;
-    return L.latLngBounds([minLat, minLon], [maxLat, maxLon]);
-  }, [gt]);
+    const pts = gt.length ? gt : fused;
+    const validPts = pts.filter((p) => p.lat !== undefined && p.lon !== undefined);
+    if (!validPts.length) return null;
 
-  // ── Initialize Leaflet map ──────────────────────────────────────────────
+    const lats = validPts.map((p) => p.lat!);
+    const lons = validPts.map((p) => p.lon!);
+    return L.latLngBounds(
+      [Math.min(...lats), Math.min(...lons)],
+      [Math.max(...lats), Math.max(...lons)]
+    );
+  }, [gt, fused]);
+
+  // Initialize Leaflet Map
   useEffect(() => {
-    if (!mapContainerRef.current) return;
-    if (mapRef.current) return; // Prevent double initialization
+    if (!mapContainerRef.current || mapRef.current) return;
 
-    const initialBounds = getTrajectoryBounds();
-    const center: [number, number] = initialBounds
-      ? [initialBounds.getCenter().lat, initialBounds.getCenter().lng]
-      : [52.374, -1.258];
+    const initialLat = fused[0]?.lat ?? 52.37045;
+    const initialLon = fused[0]?.lon ?? -1.25444;
 
     const map = L.map(mapContainerRef.current, {
-      center,
+      center: [initialLat, initialLon],
       zoom: 16,
       zoomControl: false,
-      attributionControl: true,
-      fadeAnimation: true,
-      zoomAnimation: true,
+      attributionControl: false,
     });
 
-    // Add selected tile layer
     const config = TILE_LAYERS[tileStyle];
     tileLayerRef.current = L.tileLayer(config.url, {
       attribution: config.attribution,
@@ -89,12 +82,6 @@ export const MapArea: React.FC = () => {
       subdomains: config.subdomains ?? ['a', 'b', 'c'],
     }).addTo(map);
 
-    // Fit bounds on start
-    if (initialBounds) {
-      map.fitBounds(initialBounds, { padding: [50, 50] });
-    }
-
-    // When user drags map manually, disable auto-follow
     map.on('dragstart', () => {
       setAutoFollow(false);
     });
@@ -105,9 +92,9 @@ export const MapArea: React.FC = () => {
       map.remove();
       mapRef.current = null;
     };
-  }, [getTrajectoryBounds]);
+  }, [fused, tileStyle]);
 
-  // ── Handle tile style switching ─────────────────────────────────────────
+  // Handle tile style switching
   useEffect(() => {
     if (!mapRef.current) return;
     if (tileLayerRef.current) {
@@ -121,7 +108,7 @@ export const MapArea: React.FC = () => {
     }).addTo(mapRef.current);
   }, [tileStyle]);
 
-  // ── Render Trajectory Overlay onto Canvas ────────────────────────────────
+  // Render Trajectory Overlay onto Canvas
   const renderCanvas = useCallback(() => {
     const map = mapRef.current;
     const cv = canvasRef.current;
@@ -143,7 +130,44 @@ export const MapArea: React.FC = () => {
       return { x: pt.x, y: pt.y };
     };
 
-    // 1. Draw Full Reference Ground Truth Route (Muted dashed road trace)
+    const getPixelRadius = (lat: number, lon: number, radiusMeters: number): number => {
+      if (radiusMeters <= 0) return 0;
+      const center = map.latLngToContainerPoint([lat, lon]);
+      const dLat = radiusMeters / 111320;
+      const edge = map.latLngToContainerPoint([lat + dLat, lon]);
+      return Math.max(4, Math.abs(center.y - edge.y));
+    };
+
+    const getHeadingRad = (
+      pos: TrajectoryPoint | undefined,
+      prevPos: TrajectoryPoint | undefined,
+      refStorage: { current: number }
+    ): number => {
+      if (pos?.heading !== undefined && !isNaN(pos.heading)) {
+        const rad = ((pos.heading - 90) * Math.PI) / 180;
+        refStorage.current = rad;
+        return rad;
+      }
+      if (
+        pos?.lat !== undefined &&
+        pos?.lon !== undefined &&
+        prevPos?.lat !== undefined &&
+        prevPos?.lon !== undefined
+      ) {
+        const p1 = toPixel(prevPos.lat, prevPos.lon);
+        const p2 = toPixel(pos.lat, pos.lon);
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        if (Math.hypot(dx, dy) > 0.4) {
+          const rad = Math.atan2(dy, dx);
+          refStorage.current = rad;
+          return rad;
+        }
+      }
+      return refStorage.current;
+    };
+
+    // ── 1. Full Reference Ground Truth Route (Grey dashed) ──────
     if (layers.gt && gt.length > 1) {
       const allGtPixels: { x: number; y: number }[] = [];
       for (let i = 0; i < gt.length; i++) {
@@ -151,10 +175,10 @@ export const MapArea: React.FC = () => {
           allGtPixels.push(toPixel(gt[i].lat!, gt[i].lon!));
         }
       }
-      drawTrajectory(ctx, allGtPixels, '#3A3A42', 1.8, true);
+      drawTrajectory(ctx, allGtPixels, '#5A5A64', 2.0, true);
     }
 
-    // 2. Draw Traveled GNSS Trajectory (Glowing Cyan #2DD4BF)
+    // ── 2. Traveled GNSS Trajectory (Cyan #2DD4BF) ───────────────
     if (layers.gnss && gnss.length > 1) {
       const gnssPixels: { x: number; y: number }[] = [];
       const endIdx = Math.min(currentIndex, gnss.length - 1);
@@ -163,25 +187,27 @@ export const MapArea: React.FC = () => {
           gnssPixels.push(toPixel(gnss[i].lat!, gnss[i].lon!));
         }
       }
-      drawTrajectory(ctx, gnssPixels, '#2DD4BF', 2.5, false);
-    }
-
-    // 3. Draw Fused EKF Dead Reckoning Trajectory during Outage (Safety Orange #F0801E)
-    if (layers.fused && isOutage && fused.length > 1) {
-      const outageStartIndex = fused.findIndex((p) => p.status === 'outage' || p.status === 'unavailable');
-      if (outageStartIndex !== -1 && currentIndex >= outageStartIndex) {
-        const fusedPixels: { x: number; y: number }[] = [];
-        const endIdx = Math.min(currentIndex, fused.length - 1);
-        for (let i = outageStartIndex; i <= endIdx; i++) {
-          if (fused[i].lat !== undefined && fused[i].lon !== undefined) {
-            fusedPixels.push(toPixel(fused[i].lat!, fused[i].lon!));
-          }
-        }
-        drawTrajectory(ctx, fusedPixels, '#F0801E', 3.0, false);
+      if (gnssPixels.length > 1) {
+        drawTrajectory(ctx, gnssPixels, '#2DD4BF', 2.2, false);
       }
     }
 
-    // 4. Draw Smoothed RTS Trajectory (Purple #A855F7)
+    // ── 3. Traveled AERIS ES-EKF Trajectory (Orange #F0801E) ─────
+    if (layers.fused && fused.length > 1) {
+      const fusedPixels: { x: number; y: number }[] = [];
+      const endIdx = Math.min(currentIndex, fused.length - 1);
+      for (let i = 0; i <= endIdx; i++) {
+        if (fused[i].lat !== undefined && fused[i].lon !== undefined) {
+          fusedPixels.push(toPixel(fused[i].lat!, fused[i].lon!));
+        }
+      }
+      if (fusedPixels.length > 1) {
+        // Blended line (Teal outside outage, Orange during outage)
+        drawTrajectory(ctx, fusedPixels, isOutage ? '#F0801E' : '#2DD4BF', isOutage ? 3.0 : 2.4, false);
+      }
+    }
+
+    // ── 4. Traveled Smoothed RTS Trajectory (Purple #A855F7) ────
     if (layers.smoothed && smoothed && smoothed.length > 1) {
       const smoothedPixels: { x: number; y: number }[] = [];
       const endIdx = Math.min(currentIndex, smoothed.length - 1);
@@ -190,73 +216,94 @@ export const MapArea: React.FC = () => {
           smoothedPixels.push(toPixel(smoothed[i].lat!, smoothed[i].lon!));
         }
       }
-      drawTrajectory(ctx, smoothedPixels, '#A855F7', 3.0, false);
-    }
-
-    // Determine current position
-    let curPos = null;
-    let vehicleColor = '#2DD4BF';
-
-    if (layers.smoothed && currentSmoothedPos && currentSmoothedPos.lat !== undefined && currentSmoothedPos.lon !== undefined) {
-      curPos = currentSmoothedPos;
-      vehicleColor = '#A855F7';
-    } else if (layers.fused && currentFusedPos && currentFusedPos.lat !== undefined && currentFusedPos.lon !== undefined) {
-      curPos = currentFusedPos;
-      vehicleColor = isOutage ? '#F0801E' : '#2DD4BF';
-    } else if (layers.gnss && currentGnssPos && currentGnssPos.lat !== undefined && currentGnssPos.lon !== undefined) {
-      curPos = currentGnssPos;
-      vehicleColor = isOutage ? '#E5484D' : '#2DD4BF';
-    }
-
-    if (!curPos) return;
-
-    const curPt = toPixel(curPos.lat, curPos.lon);
-
-    // Calculate heading from recent movement
-    if (currentIndex > 0) {
-      let prevPos = null;
-      if (layers.smoothed) prevPos = smoothed[currentIndex - 1];
-      else if (layers.fused) prevPos = fused[currentIndex - 1];
-      else if (layers.gnss) prevPos = gnss[currentIndex - 1];
-      
-      if (prevPos && prevPos.lat !== undefined && prevPos.lon !== undefined) {
-        const prevPt = toPixel(prevPos.lat, prevPos.lon);
-        const dx = curPt.x - prevPt.x;
-        const dy = curPt.y - prevPt.y;
-        if (Math.hypot(dx, dy) > 0.4) {
-          lastHeadingRef.current = Math.atan2(dy, dx);
-        }
+      if (smoothedPixels.length > 1) {
+        drawTrajectory(ctx, smoothedPixels, '#A855F7', 2.8, false);
       }
     }
-    const heading = lastHeadingRef.current;
 
-    // Helper: calculate physical radius in screen pixels
-    const getPixelRadius = (lat: number, lon: number, radiusMeters: number): number => {
-      if (radiusMeters <= 0) return 0;
-      const center = map.latLngToContainerPoint([lat, lon]);
-      const dLat = radiusMeters / 111320; // 1 degree lat ≈ 111.32 km
-      const edge = map.latLngToContainerPoint([lat + dLat, lon]);
-      return Math.max(3, Math.abs(center.y - edge.y));
-    };
+    // Count how many vehicle layers are actively toggled
+    const activeCount =
+      (layers.gnss ? 1 : 0) + (layers.fused ? 1 : 0) + (layers.smoothed ? 1 : 0);
 
-    // Draw GNSS Uncertainty Circle
-    if (layers.gnss && isOutage && currentGnssPos && currentGnssPos.lat !== undefined && currentGnssPos.lon !== undefined) {
-      const gnssCenter = toPixel(currentGnssPos.lat, currentGnssPos.lon);
-      const gnssRadiusPx = getPixelRadius(currentGnssPos.lat, currentGnssPos.lon, gnssError);
-      drawUncertaintyCircle(ctx, gnssCenter.x, gnssCenter.y, gnssRadiusPx, 'rgba(45, 212, 191, 0.15)');
+    // ── 5A. Render GNSS Raw Vehicle Arrow ────────────────────────
+    if (layers.gnss && currentGnssPos && currentGnssPos.lat !== undefined && currentGnssPos.lon !== undefined) {
+      const pt = toPixel(currentGnssPos.lat, currentGnssPos.lon);
+      const prev = currentIndex > 0 ? gnss[currentIndex - 1] : undefined;
+      const h = getHeadingRad(currentGnssPos, prev, lastGnssHeadingRef);
+      const gnssColor = isOutage ? '#E5484D' : '#2DD4BF';
+
+      if (isOutage) {
+        const rPx = getPixelRadius(currentGnssPos.lat, currentGnssPos.lon, gnssError);
+        drawUncertaintyCircle(ctx, pt.x, pt.y, rPx, 'rgba(229, 72, 77, 0.12)');
+      }
+
+      drawVehicleMarker(
+        ctx,
+        pt.x,
+        pt.y,
+        h,
+        gnssColor,
+        activeCount > 1 ? 'GNSS' : undefined,
+        isOutage,
+        !layers.fused && !layers.smoothed // Halo only if primary
+      );
     }
 
-    // Draw Fused Uncertainty Circle
-    if (layers.fused && isOutage && currentFusedPos && currentFusedPos.lat !== undefined && currentFusedPos.lon !== undefined) {
-      const fusedRadiusPx = getPixelRadius(currentFusedPos.lat, currentFusedPos.lon, aerisError);
-      drawUncertaintyCircle(ctx, curPt.x, curPt.y, fusedRadiusPx, 'rgba(240, 128, 30, 0.15)');
+    // ── 5B. Render RTS Smoothed Vehicle Arrow ───────────────────
+    if (layers.smoothed && currentSmoothedPos && currentSmoothedPos.lat !== undefined && currentSmoothedPos.lon !== undefined) {
+      const pt = toPixel(currentSmoothedPos.lat, currentSmoothedPos.lon);
+      const prev = currentIndex > 0 ? smoothed[currentIndex - 1] : undefined;
+      const h = getHeadingRad(currentSmoothedPos, prev, lastSmoothedHeadingRef);
+
+      drawVehicleMarker(
+        ctx,
+        pt.x,
+        pt.y,
+        h,
+        '#A855F7',
+        activeCount > 1 ? 'RTS' : undefined,
+        false,
+        !layers.fused // Halo if fused is off
+      );
     }
 
-    // Draw Vehicle Marker with active beacon pulse during outage
-    drawVehicleMarker(ctx, curPt.x, curPt.y, heading, vehicleColor, isOutage);
+    // ── 5C. Render AERIS ES-EKF Vehicle Arrow (Primary Solution) ─
+    if (layers.fused && currentFusedPos && currentFusedPos.lat !== undefined && currentFusedPos.lon !== undefined) {
+      const pt = toPixel(currentFusedPos.lat, currentFusedPos.lon);
+      const prev = currentIndex > 0 ? fused[currentIndex - 1] : undefined;
+      const h = getHeadingRad(currentFusedPos, prev, lastFusedHeadingRef);
+      const fusedColor = isOutage ? '#F0801E' : '#2DD4BF';
+
+      if (isOutage) {
+        const rPx = getPixelRadius(currentFusedPos.lat, currentFusedPos.lon, aerisError);
+        drawUncertaintyCircle(ctx, pt.x, pt.y, rPx, 'rgba(240, 128, 30, 0.20)');
+      }
+
+      drawVehicleMarker(
+        ctx,
+        pt.x,
+        pt.y,
+        h,
+        fusedColor,
+        activeCount > 1 ? 'ES-EKF' : undefined,
+        isOutage,
+        true // Always prominent halo
+      );
+    }
   }, [gt, gnss, fused, smoothed, currentIndex, currentGnssPos, currentFusedPos, currentSmoothedPos, layers, isOutage, aerisError, gnssError]);
 
-  // ── Sync canvas whenever map moves, zooms, or renders ───────────────────
+  // Continuous animation loop for beacon pulse wave & live rendering
+  useEffect(() => {
+    const loop = () => {
+      renderCanvas();
+      animFrameRef.current = requestAnimationFrame(loop);
+    };
+    animFrameRef.current = requestAnimationFrame(loop);
+    return () => {
+      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    };
+  }, [renderCanvas]);
+
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -272,24 +319,22 @@ export const MapArea: React.FC = () => {
     };
   }, [renderCanvas]);
 
-  // ── Camera Auto-Follow & Playback Frame Update ───────────────────────────
+  // Auto-follow vehicle camera (Priority: Fused -> Smoothed -> GNSS)
   useEffect(() => {
     const map = mapRef.current;
     if (map && autoFollow) {
       let pos = null;
-      if (layers.smoothed) pos = currentSmoothedPos;
-      else if (layers.fused) pos = currentFusedPos;
+      if (layers.fused) pos = currentFusedPos;
+      else if (layers.smoothed) pos = currentSmoothedPos;
       else if (layers.gnss) pos = currentGnssPos;
 
       if (pos && pos.lat !== undefined && pos.lon !== undefined) {
-        // Keep camera centered on vehicle during playback
-        map.setView([pos.lat, pos.lon], map.getZoom(), { animate: false });
+        map.panTo([pos.lat, pos.lon], { animate: false });
       }
     }
     renderCanvas();
   }, [currentIndex, autoFollow, currentFusedPos, currentGnssPos, currentSmoothedPos, layers, renderCanvas]);
 
-  // ── Container Resize Handler ────────────────────────────────────────────
   useEffect(() => {
     const handleResize = () => {
       if (mapRef.current) {
@@ -301,12 +346,11 @@ export const MapArea: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, [renderCanvas]);
 
-  // ── HUD Actions ─────────────────────────────────────────────────────────
   const handleFitRoute = () => {
     setAutoFollow(false);
     const bounds = getTrajectoryBounds();
     if (mapRef.current && bounds) {
-      mapRef.current.fitBounds(bounds, { padding: [60, 60], animate: true });
+      mapRef.current.fitBounds(bounds, { padding: [40, 40], animate: true });
     }
   };
 
@@ -315,12 +359,12 @@ export const MapArea: React.FC = () => {
     setAutoFollow(next);
     if (next && mapRef.current) {
       let pos = null;
-      if (layers.smoothed) pos = currentSmoothedPos;
-      else if (layers.fused) pos = currentFusedPos;
+      if (layers.fused) pos = currentFusedPos;
+      else if (layers.smoothed) pos = currentSmoothedPos;
       else if (layers.gnss) pos = currentGnssPos;
 
       if (pos && pos.lat !== undefined && pos.lon !== undefined) {
-        mapRef.current.panTo([pos.lat, pos.lon], { animate: true });
+        mapRef.current.setView([pos.lat, pos.lon], 16, { animate: true });
       }
     }
   };
@@ -329,16 +373,13 @@ export const MapArea: React.FC = () => {
   const handleZoomOut = () => mapRef.current?.zoomOut();
 
   return (
-    <div className="portal-canvas-wrap">
-      {/* Real OpenStreetMap / CartoDB Tile Layer underneath */}
+    <div className="map-viewport-container">
+      {/* Base Leaflet Map */}
       <div
         id="leafletMap"
         ref={mapContainerRef}
-        className="portal-leaflet-map"
+        className={`portal-leaflet-map tile-${tileStyle}`}
       />
-
-      {/* Subtle coordinate grid overlay */}
-      <div className="grid-overlay" />
 
       {/* Trajectory & vehicle canvas overlay */}
       <canvas
@@ -347,76 +388,48 @@ export const MapArea: React.FC = () => {
         style={{ width: '100%', height: '100%', display: 'block' }}
       />
 
-      {/* Top-Right Technical Orientation Compass Rose */}
-      <div className="map-compass-hud">
-        <div className="compass-reticle">
-          <div className="compass-needle-n"></div>
-          <span className="compass-n-label">N</span>
-        </div>
-        <div className="compass-meta">
-          <span className="compass-datum">WGS-84</span>
-          <span className="compass-grid">ENU 10Hz</span>
-        </div>
-      </div>
-
-      {/* Floating Solid HUD Controls */}
-      <div className="map-hud-controls">
-        <div className="map-hud-group">
+      {/* Small Compact Floating Map Control Box (Top-Right) */}
+      <div className="map-floating-box">
+        <div className="map-btn-row">
           <button
-            className={`map-hud-btn ${autoFollow ? 'active' : ''}`}
+            className={`map-ctrl-btn ${autoFollow ? 'active' : ''}`}
             onClick={handleToggleAutoFollow}
-            title={autoFollow ? 'Auto-follow active' : 'Click to follow vehicle'}
           >
-            <LocateFixed size={13} className="hud-ic" />
-            <span>FOLLOW</span>
+            FOLLOW
           </button>
           <button
-            className="map-hud-btn"
+            className="map-ctrl-btn"
             onClick={handleFitRoute}
-            title="Fit entire trajectory to screen"
           >
-            <Maximize2 size={12} className="hud-ic" />
-            <span>FIT ROUTE</span>
+            FIT ROUTE
           </button>
         </div>
-
-        <div className="map-hud-group">
+        <div className="map-btn-row">
           <button
-            className={`map-hud-btn ${tileStyle === 'dark' ? 'active' : ''}`}
+            className={`map-ctrl-btn ${tileStyle === 'dark' ? 'active' : ''}`}
             onClick={() => setTileStyle('dark')}
           >
             DARK
           </button>
           <button
-            className={`map-hud-btn ${tileStyle === 'streets' ? 'active' : ''}`}
+            className={`map-ctrl-btn ${tileStyle === 'streets' ? 'active' : ''}`}
             onClick={() => setTileStyle('streets')}
           >
             STREETS
           </button>
           <button
-            className={`map-hud-btn ${tileStyle === 'satellite' ? 'active' : ''}`}
+            className={`map-ctrl-btn ${tileStyle === 'satellite' ? 'active' : ''}`}
             onClick={() => setTileStyle('satellite')}
           >
             SAT
           </button>
         </div>
+      </div>
 
-        <div className="map-hud-group">
-          <button
-            className="map-hud-btn map-hud-icon-btn"
-            onClick={handleZoomIn}
-            title="Zoom In"
-          >
-            <Plus size={13} />
-          </button>
-          <button
-            className="map-hud-btn map-hud-icon-btn"
-            onClick={handleZoomOut}
-            title="Zoom Out"
-          >
-            <Minus size={13} />
-          </button>
-        </div>
+      {/* Separate + / − Zoom Controls on Map */}
+      <div className="map-zoom-controls">
+        <button className="map-zoom-btn" onClick={handleZoomIn} title="Zoom In">+</button>
+        <button className="map-zoom-btn" onClick={handleZoomOut} title="Zoom Out">−</button>
       </div>
     </div>
   );

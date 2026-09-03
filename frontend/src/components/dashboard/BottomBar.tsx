@@ -1,20 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { PlaybackControls } from './PlaybackControls';
 import { TimelineSlider } from './TimelineSlider';
-import { ChartsPanel } from './ChartsPanel';
 import { useDashboardContext } from '../../context/DashboardContext';
-import { LineChart, ChevronUp, ChevronDown, Command } from 'lucide-react';
+import { Zap } from 'lucide-react';
 
 export const BottomBar: React.FC = () => {
-  const [chartsOpen, setChartsOpen] = useState(false);
   const { speed, setSpeed, isPlaying, setIsPlaying, setProgress, simulateOutage, setSimulateOutage } = useDashboardContext();
 
   const speeds = [0.5, 1, 2, 4];
 
-  // Global Keyboard Shortcuts
+  // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if user is typing in an input
       if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
 
       if (e.code === 'Space') {
@@ -29,9 +26,6 @@ export const BottomBar: React.FC = () => {
       } else if (e.key === 'o' || e.key === 'O') {
         e.preventDefault();
         setSimulateOutage(!simulateOutage);
-      } else if (e.key === 'c' || e.key === 'C') {
-        e.preventDefault();
-        setChartsOpen((prev) => !prev);
       }
     };
 
@@ -40,44 +34,33 @@ export const BottomBar: React.FC = () => {
   }, [isPlaying, setIsPlaying, setProgress, simulateOutage, setSimulateOutage]);
 
   return (
-    <>
-      <ChartsPanel isOpen={chartsOpen} />
-      
-      <div className="portal-bottom">
-        <PlaybackControls />
-        <TimelineSlider />
+    <div className="portal-bottom-bar">
+      <PlaybackControls />
+      <TimelineSlider />
 
-        {/* Speed Selector Segmented Pill */}
-        <div className="speed-segment-group">
-          {speeds.map((s) => (
-            <button
-              key={s}
-              className={`speed-pill ${speed === s ? 'active' : ''}`}
-              onClick={() => setSpeed(s)}
-              title={`Playback Rate: ${s}×`}
-            >
-              {s}×
-            </button>
-          ))}
-        </div>
-
-        {/* Expandable Charts Button */}
-        <button 
-          className={`charts-toggle-btn ${chartsOpen ? 'open' : ''}`} 
-          onClick={() => setChartsOpen(!chartsOpen)}
-          title="Toggle Telemetry Graphs [C]"
-        >
-          <LineChart size={13} />
-          <span>CHARTS</span>
-          {chartsOpen ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
-        </button>
-
-        {/* Keyboard Quick Help Badge */}
-        <div className="bottom-kbd-hint" title="Keyboard controls: [Space] Play/Pause • [←/→] Scrub • [O] Outage • [C] Charts">
-          <Command size={11} />
-          <span>KBD</span>
-        </div>
+      {/* Speed Selector */}
+      <div className="speed-pill-group">
+        {speeds.map((s) => (
+          <button
+            key={s}
+            className={`speed-pill-btn ${speed === s ? 'active' : ''}`}
+            onClick={() => setSpeed(s)}
+            title={`Speed: ${s}×`}
+          >
+            {s}×
+          </button>
+        ))}
       </div>
-    </>
+
+      {/* Outage Simulation Switch */}
+      <button 
+        className={`outage-toggle-btn ${simulateOutage ? 'active-outage' : ''}`}
+        onClick={() => setSimulateOutage(!simulateOutage)}
+        title="Simulate GNSS Outage [O]"
+      >
+        <Zap size={13} />
+        <span>{simulateOutage ? 'RESTORE GNSS' : 'SIMULATE OUTAGE'}</span>
+      </button>
+    </div>
   );
 };

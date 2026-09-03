@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState } from 'react';
 import type { ReactNode } from 'react';
 
-interface Layers {
+export interface Layers {
   gt: boolean;
   gnss: boolean;
   fused: boolean;
@@ -17,13 +17,10 @@ interface DashboardContextType {
   setSpeed: (val: number) => void;
   simulateOutage: boolean;
   setSimulateOutage: (val: boolean) => void;
-  /** progress (0-1) at the moment Simulate Outage was clicked; null when off.
-   *  Lets the UI compute a real elapsed timer for the manual outage instead of
-   *  walking the recorded per-point status (which stays 'healthy' during a
-   *  manual override — that mismatch was showing "SIGNAL LOST — 0.0s"). */
   manualOutageStart: number | null;
   layers: Layers;
   setLayers: React.Dispatch<React.SetStateAction<Layers>>;
+  toggleLayer: (key: keyof Layers) => void;
   resetSimulation: () => void;
 }
 
@@ -35,7 +32,11 @@ export const DashboardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [speed, setSpeed] = useState(1);
   const [simulateOutage, setSimulateOutageRaw] = useState(false);
   const [manualOutageStart, setManualOutageStart] = useState<number | null>(null);
-  const [layers, setLayers] = useState<Layers>({ gt: true, gnss: true, fused: true, smoothed: false });
+  const [layers, setLayers] = useState<Layers>({ gt: true, gnss: true, fused: true, smoothed: true });
+
+  const toggleLayer = (key: keyof Layers) => {
+    setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const setSimulateOutage = (val: boolean) => {
     setSimulateOutageRaw(val);
@@ -57,6 +58,7 @@ export const DashboardProvider: React.FC<{ children: ReactNode }> = ({ children 
       simulateOutage, setSimulateOutage,
       manualOutageStart,
       layers, setLayers,
+      toggleLayer,
       resetSimulation
     }}>
       {children}
