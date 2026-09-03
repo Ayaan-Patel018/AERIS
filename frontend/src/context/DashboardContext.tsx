@@ -32,7 +32,7 @@ export const DashboardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [speed, setSpeed] = useState(1);
   const [simulateOutage, setSimulateOutageRaw] = useState(false);
   const [manualOutageStart, setManualOutageStart] = useState<number | null>(null);
-  const [layers, setLayers] = useState<Layers>({ gt: true, gnss: true, fused: true, smoothed: true });
+  const [layers, setLayers] = useState<Layers>({ gt: true, gnss: true, fused: true, smoothed: false });
 
   const toggleLayer = (key: keyof Layers) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
