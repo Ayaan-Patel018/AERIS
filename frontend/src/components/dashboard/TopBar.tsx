@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useGNSSStatus } from '../../hooks/useGNSSStatus';
 import { useTrajectoryData } from '../../hooks/useTrajectoryData';
 import { ArrowLeft, Users } from 'lucide-react';
+import aerisLogo from '../../assets/aeris-logo-transparent.svg';
 
 export const TopBar: React.FC = () => {
   const [time, setTime] = useState('——:——:—— UTC');
@@ -54,8 +55,10 @@ export const TopBar: React.FC = () => {
           <Users size={13} />
           <span>DEVS</span>
         </button>
-        <span className="top-brand">AERIS COCKPIT</span>
-        <span className="top-sub-tag">15-STATE ES-EKF</span>
+        <div className="top-brand-wrap">
+          <img src={aerisLogo} alt="AERIS" className="top-brand-logo" />
+          <span className="top-sub-tag">15-STATE ES-EKF</span>
+        </div>
       </div>
 
       <div className="top-center">

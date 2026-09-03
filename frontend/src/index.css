@@ -708,79 +708,147 @@ h2.sec-title {
   top: 0;
   left: 0;
   right: 0;
-  height: var(--navbar-h);
-  background: rgba(255, 255, 255, 0.02);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  height: 68px;
+  background: rgba(10, 10, 14, 0.84);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   z-index: 500;
-  transition: background var(--dur-slow), backdrop-filter var(--dur-slow);
-  border-bottom: 1px solid var(--line);
-  /* persistent grid line */
+  transition: background var(--dur-base), border-color var(--dur-base), box-shadow var(--dur-base);
+  border-bottom: 1px solid #1E202B;
 }
 
 .navbar.scrolled {
-  background: rgba(255, 255, 255, 0.04);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  background: rgba(8, 8, 12, 0.95);
+  border-bottom-color: rgba(45, 212, 191, 0.25);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
 }
 
-.nav-inner {
+.navbar-container {
   max-width: 1400px;
   margin: 0 auto;
   height: 100%;
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  border-left: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-}
-
-.nav-logo {
-  grid-column: 1 / 2;
-  border-right: 1px solid var(--line);
-  padding: 0 48px;
-  font-family: var(--f-p);
-  font-size: 14px;
-  color: var(--ink);
-  letter-spacing: .05em;
+  padding: 0 28px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 24px;
 }
 
-.nav-logo span {
-  color: var(--ink);
-  opacity: 0.7;
-}
-
-.nav-links {
-  grid-column: 2 / 5;
-  border-right: 1px solid var(--line);
+.navbar-brand {
   display: flex;
-  gap: 32px;
   align-items: center;
-  padding: 0 48px;
+  gap: 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.navbar-logo-img {
+  height: 24px;
+  width: auto;
+  display: block;
+  transition: opacity 140ms ease;
+}
+.navbar-brand:hover .navbar-logo-img {
+  opacity: 0.85;
+}
+
+.navbar-brand-badge {
   font-family: var(--f-m);
-  font-size: 14px;
-  letter-spacing: .05em;
-  color: var(--ink);
+  font-size: 10px;
+  font-weight: 700;
+  color: #2DD4BF;
+  background: rgba(45, 212, 191, 0.1);
+  border: 1px solid rgba(45, 212, 191, 0.3);
+  padding: 2px 7px;
+  border-radius: 2px;
+  letter-spacing: 0.05em;
 }
 
-.nav-links a {
-  transition: color var(--dur-fast), opacity var(--dur-fast);
-  color: var(--ink);
-  opacity: 0.7;
-}
-
-.nav-links a:hover {
-  opacity: 1;
-}
-
-.nav-cta {
-  grid-column: 5 / 6;
+.navbar-links {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 6px;
+}
+
+.nav-link-btn {
+  background: transparent;
+  border: none;
+  color: #A0A0B0;
+  font-family: var(--f-m);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: 3px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 140ms ease;
+}
+
+.nav-link-btn:hover {
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.nav-link-devs {
+  color: #2DD4BF;
+  background: rgba(45, 212, 191, 0.08);
+  border: 1px solid rgba(45, 212, 191, 0.25);
+}
+
+.nav-link-devs:hover {
+  background: rgba(45, 212, 191, 0.18);
+  border-color: #2DD4BF;
+  color: #FFFFFF;
+}
+
+.navbar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.navbar-system-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--f-m);
+  font-size: 10px;
+  color: #8E8E9E;
+  letter-spacing: 0.05em;
+}
+
+.navbar-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2DD4BF;
+  box-shadow: 0 0 8px #2DD4BF;
+}
+
+.navbar-cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #2DD4BF;
+  color: #08080C;
+  font-family: var(--f-d);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 8px 18px;
+  border-radius: 3px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.navbar-cta-btn:hover {
+  background: #5EEAD4;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(45, 212, 191, 0.35);
 }
 
 /* ── BENTO BOX CORNER DOTS ─────────────────── */
@@ -1299,6 +1367,17 @@ h2.sec-title {
   color: #FFF;
   border-color: #383842;
   background: #1A1A22;
+}
+.top-brand-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 6px;
+}
+.top-brand-logo {
+  height: 20px;
+  width: auto;
+  display: block;
 }
 .top-brand {
   font-family: var(--f-d);
