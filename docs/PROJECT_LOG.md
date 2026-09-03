@@ -273,3 +273,15 @@ Same order of magnitude, not identical (expected/good). "Not cherry-picked" evid
 
 **Decided:** The map tile integration provides genuine geographical context without compromising 60 FPS trajectory playback or data honesty.
 
+---
+
+## 2026-09-03 — End-to-End Frontend Layer Verification (All 4 Layers, Zero-Layer Bug Fix, RTS Default OFF, 1x Playback)
+
+**Did:**
+- Executed full automated end-to-end browser test on `/portal` verifying all merged frontend work.
+- **Layer Toggles & Disappearance Bug Fix:** Tested all 4 layers individually. Confirmed each layer's line (Ground Truth, GNSS Only, AERIS Fused, RTS Smoothed) toggles cleanly. Confirmed that when all 4 layers are turned OFF, the vehicle marker disappears completely from the canvas with zero silent fallback to hidden layers.
+- **RTS Smoothed Default:** Confirmed RTS Smoothed layer defaults to OFF on initial page load; vehicle marker starts in real-time cyan/teal (`#2DD4BF`), never purple.
+- **Caption Text & Encoding:** Confirmed RTS Smoothed caption renders cleanly with proper em-dash without character corruption: *"Post-processed using the complete recorded drive — not available to a live system."*
+- **1x Real-Time Playback & Diagnostics:** Executed full playback at 1x speed. Telemetry metrics (Heading, Pos Error, Confidence, ES-EKF estimator) and dual charts (Position Error Over Time, Velocity Comparison) rendered smoothly with 0 console errors/warnings.
+
+
