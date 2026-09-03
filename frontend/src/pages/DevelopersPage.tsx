@@ -1,99 +1,129 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import aerisLogo from '../assets/aeris-logo-transparent.svg';
-import { 
-  Shield, 
-  Cpu, 
-  Layers, 
-  Database, 
-  CheckCircle2, 
-  Zap, 
-  ArrowLeft, 
-  Navigation, 
-  Terminal,
-  Activity
-} from 'lucide-react';
+import { ArrowLeft, Navigation, ExternalLink, Code2 } from 'lucide-react';
 
-interface Member {
+interface Developer {
   name: string;
   role: string;
-  badge: string;
-  subtitle: string;
-  accent: string;
+  focus: string;
+  avatar: string;
+  github: string;
+  linkedin?: string;
   description: string;
   tags: string[];
   metrics: { label: string; value: string };
-  icon: React.ReactNode;
 }
 
-const MEMBERS: Member[] = [
-  {
-    name: "Anurag Mishra",
-    role: "Team Lead / Navigation Algorithms",
-    badge: "LEAD // NAV ALGORITHMS",
-    subtitle: "15-State Error-State EKF • Covariance Mechanics • Filter Architecture",
-    accent: "var(--status-ok)",
-    description: "Led core algorithmic architecture of the 15-state Error-State Kalman Filter (ES-EKF). Derived error dynamics Jacobians, dynamic process noise scaling with per-step Δt, Joseph-form covariance stabilization, and verified the 161-test automated suite.",
-    tags: ["15-State ES-EKF", "Quaternion Kinematics", "Covariance Symmetry", "Joseph Form", "IO-VNBD Benchmark"],
-    metrics: { label: "Filter Integrity", value: "161/161 Tests Passed" },
-    icon: <Shield size={20} color="var(--status-ok)" />
-  },
-  {
-    name: "Ayaan Patel",
-    role: "AI/ML Kinematics & Offline Smoothing",
-    badge: "AI // KINEMATICS & RTS",
-    subtitle: "Rauch-Tung-Striebel Smoother • ZARU Zero-Velocity Logic • Deep Kinematics",
-    accent: "var(--neon-purple)",
-    description: "Architected the Rauch-Tung-Striebel (RTS) backward offline smoothing pass and Zero Angular Rate Update (ZARU) bias corrections. Achieved a verified 39.5% mean error reduction on S3b and 69.1% on unseen S1 benchmark data.",
-    tags: ["RTS Smoother", "ZARU Drift Arrest", "Backward Recursion", "BiGRU Kinematics", "PyTorch"],
-    metrics: { label: "Smoothed Gain", value: "−69.1% Mean Error (S1)" },
-    icon: <Cpu size={20} color="var(--neon-purple)" />
-  },
-  {
-    name: "Aryan Badoriya",
-    role: "Systems Integration & Telemetry Cockpit",
-    badge: "SYSTEMS // FRONTEND COCKPIT",
-    subtitle: "Leaflet Map Tile Engine • Multi-Layer Canvas Sync • 60 FPS Telemetry",
-    accent: "var(--orange)",
-    description: "Engineered the real-time telemetry cockpit, synchronizing Leaflet OpenStreetMap tiles with high-frequency 60 FPS canvas rendering. Integrated multi-layer toggles, sub-centimeter WGS84 coordinate projections, and interactive diagnostics.",
-    tags: ["React 19 / TypeScript", "Leaflet Tile Engine", "60 FPS Canvas", "WGS-84 Projection", "Vite Build"],
-    metrics: { label: "Telemetry Rate", value: "60 FPS / Real-Time" },
-    icon: <Layers size={20} color="var(--orange)" />
-  },
+const DEVELOPERS: Developer[] = [
   {
     name: "Ananya Sharma",
-    role: "Data Engineering & GNSS Pipelines",
-    badge: "DATA // INGESTION & PIPELINES",
-    subtitle: "IO-VNBD Dataset Ingestion • Outage Injection • Coordinate Standardization",
-    accent: "var(--data)",
-    description: "Developed data loaders, schema validators, and dataset ingestion pipelines for the IO-VNBD Oxford/Rugby benchmark sequences. Engineered synthetic GNSS outage injection tools and WGS84 to local ENU coordinate transformations.",
-    tags: ["IO-VNBD Dataset", "ENU Coordinates", "Outage Simulation", "NumPy / Pandas", "Schema Validation"],
-    metrics: { label: "Dataset Sync", value: "6,812 Timesteps Aligned" },
-    icon: <Database size={20} color="var(--data)" />
+    role: "Developer // Data Engineering",
+    focus: "Data Ingestion & GNSS Outage Simulation",
+    avatar: "https://github.com/ananyascodes.png",
+    github: "https://github.com/ananyascodes",
+    linkedin: "https://www.linkedin.com/in/ananya-sharma-dev/",
+    description: "Architected dataset loaders, schema validators, and data pipelines for the IO-VNBD Oxford/Rugby benchmark sequences. Engineered synthetic GNSS outage injection tools and WGS-84 to ENU conversions.",
+    tags: ["IO-VNBD Dataset", "ENU Projection", "Outage Simulation", "NumPy / Pandas", "Pipeline Verification"],
+    metrics: { label: "Dataset Sync", value: "6,812 Timesteps Aligned" }
   },
   {
     name: "Shreya Zutshi",
-    role: "Validation Engineering & Statistical Testing",
-    badge: "QA // ALGORITHMIC VERIFICATION",
-    subtitle: "Automated Test Suites • Covariance Convergence • Positive Definiteness",
-    accent: "var(--status-ok-hi)",
-    description: "Designed end-to-end regression test suites, verifying covariance positive-definiteness, numerical conditioning, and machine-epsilon symmetry across thousands of simulation epochs. Built synthetic smoke tests for filter resilience.",
-    tags: ["Test Automation", "PSD Verification", "Numerical Stability", "Edge Cases", "Pytest / Unittest"],
-    metrics: { label: "Unit Suite", value: "92 Tests in 0.57s" },
-    icon: <CheckCircle2 size={20} color="var(--status-ok-hi)" />
+    role: "Developer // Validation Engineering",
+    focus: "Automated Testing & Covariance Stability",
+    avatar: "https://github.com/shreyazutshi.png",
+    github: "https://github.com/shreyazutshi",
+    linkedin: "https://www.linkedin.com/in/shreya-zutshi/",
+    description: "Designed the automated test suite and regression harnesses, verifying covariance positive-definiteness, numerical conditioning, and filter stability across simulation epochs.",
+    tags: ["Automated Testing", "PSD Verification", "Numerical Conditioning", "Pytest Suite", "Filter QA"],
+    metrics: { label: "Automated Suite", value: "161/161 Tests Passed" }
+  },
+  {
+    name: "Aryan Bhadoriya",
+    role: "Developer // Systems Integration",
+    focus: "Frontend Cockpit & Leaflet Canvas Sync",
+    avatar: "https://github.com/Codewiz-cpp.png",
+    github: "https://github.com/Codewiz-cpp",
+    linkedin: "https://www.linkedin.com/in/aryan-bhadoriya-a53a34325/",
+    description: "Engineered the real-time telemetry cockpit, Leaflet map engine, high-performance canvas multi-trajectory rendering, and interactive playback synchronization.",
+    tags: ["React 19 / Vite", "Leaflet Maps Engine", "Canvas Overlays", "Telemetry Cockpit", "WGS-84 Projection"],
+    metrics: { label: "Telemetry Rate", value: "60 FPS / Real-Time" }
+  },
+  {
+    name: "Anurag Mishra",
+    role: "Developer // Navigation Algorithms",
+    focus: "15-State Error-State EKF & Covariance Mechanics",
+    avatar: "https://github.com/anuragmishra5159.png",
+    github: "https://github.com/anuragmishra5159",
+    linkedin: "https://www.linkedin.com/in/anuragmishra5159/",
+    description: "Derived error-state kinematics, dynamic process noise scaling with variable time steps, Joseph-form covariance stabilization, and attitude quaternion kinematics for the 15-state ES-EKF.",
+    tags: ["15-State ES-EKF", "Quaternion Kinematics", "Covariance Mechanics", "Joseph Form", "Inertial Dead Reckoning"],
+    metrics: { label: "Filter Mechanics", value: "15-State Error Dynamics" }
+  },
+  {
+    name: "Ayaan Patel",
+    role: "Developer // AI/ML Kinematics",
+    focus: "Offline RTS Smoothing & ZARU Drift Arrest",
+    avatar: "https://github.com/Ayaan-Patel018.png",
+    github: "https://github.com/Ayaan-Patel018",
+    description: "Implemented the Rauch-Tung-Striebel (RTS) backward smoothing pass and Zero Angular Rate Update (ZARU) for post-processing drift elimination, achieving up to 69.1% error reduction.",
+    tags: ["RTS Smoother", "ZARU Drift Arrest", "Backward Recursion", "Kinematic Analysis", "PyTorch / NumPy"],
+    metrics: { label: "Smoothing Gain", value: "−69.1% Error on S1" }
   },
   {
     name: "Ananya Tiwari",
-    role: "Quality Assurance & Embedded Modeling",
-    badge: "EMBEDDED // EDGE OPTIMIZATION",
-    subtitle: "Hardware Constraints • Edge Inference Optimization • Latency Benchmarking",
-    accent: "var(--orange-hi)",
-    description: "Evaluated real-time algorithmic execution limits to ensure zero-latency operation on low-power automotive compute units. Profiled memory consumption, execution timing, and edge-readiness for embedded deployment.",
-    tags: ["Embedded Systems", "Latency Profiling", "Zero-Latency Handoff", "Resource Optimization", "Edge Profiling"],
-    metrics: { label: "Compute Budget", value: "< 10ms Real-Time Latency" },
-    icon: <Zap size={20} color="var(--orange-hi)" />
+    role: "Developer // Quality Assurance",
+    focus: "Edge Optimization & Execution Profiling",
+    avatar: "https://github.com/Ananya3107.png",
+    github: "https://github.com/Ananya3107",
+    linkedin: "https://www.linkedin.com/in/ananya-tiwari-devs/",
+    description: "Evaluated algorithmic execution constraints, edge compute latency, and memory profiling to ensure zero-latency operation for embedded automotive deployment.",
+    tags: ["Embedded Systems", "Latency Profiling", "Hardware Constraints", "Edge Optimization", "QA Verification"],
+    metrics: { label: "Compute Budget", value: "< 10ms Real-Time Latency" }
   }
 ];
+
+const GithubIcon: React.FC<{ size?: number }> = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path>
+    <path d="M9 18c-4.51 2-5-2-7-2"></path>
+  </svg>
+);
+
+const LinkedinIcon: React.FC<{ size?: number }> = ({ size = 14 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path>
+    <rect x="2" y="9" width="4" height="12"></rect>
+    <circle cx="4" cy="4" r="2"></circle>
+  </svg>
+);
+
+const DevAvatar: React.FC<{ src: string; name: string }> = ({ src, name }) => {
+  const [hasError, setHasError] = useState(false);
+
+  const getInitials = (str: string) => {
+    return str
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+      .slice(0, 2);
+  };
+
+  if (hasError) {
+    return <div className="dev-avatar-fallback">{getInitials(name)}</div>;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={name}
+      className="dev-avatar-img"
+      loading="lazy"
+      onError={() => setHasError(true)}
+    />
+  );
+};
 
 export const DevelopersPage: React.FC = () => {
   const navigate = useNavigate();
@@ -103,27 +133,27 @@ export const DevelopersPage: React.FC = () => {
     if (pt) pt.classList.add('active');
     setTimeout(() => {
       navigate(path);
-    }, 280);
+    }, 250);
   };
 
   return (
     <div className="devs-page">
-      {/* Top Tactical Navigation Header */}
-      <header className="devs-nav container">
-        <div className="devs-nav-inner">
+      {/* Top Navigation Header */}
+      <header className="devs-nav">
+        <div className="container devs-nav-inner">
           <div className="devs-nav-left">
             <button className="devs-back-btn" onClick={() => handleNav('/')}>
-              <ArrowLeft size={16} />
-              <span>BACK TO MISSION BRIEFING</span>
+              <ArrowLeft size={15} />
+              <span>HOME</span>
             </button>
-            <div className="devs-divider"></div>
+            <div className="devs-divider" />
             <img src={aerisLogo} alt="AERIS Logo" className="devs-logo" />
-            <span className="devs-tagline">ENGINEERING CADRE</span>
+            <span className="devs-tagline">PROJECT CONTRIBUTORS</span>
           </div>
           <div className="devs-nav-right">
             <button className="devs-cta-btn" onClick={() => handleNav('/portal')}>
               <Navigation size={14} />
-              <span>LAUNCH GNSS PORTAL</span>
+              <span>LAUNCH COCKPIT</span>
             </button>
           </div>
         </div>
@@ -131,23 +161,17 @@ export const DevelopersPage: React.FC = () => {
 
       {/* Main Content */}
       <main className="container devs-main">
-        {/* Hero Section */}
+        {/* Intro Block */}
         <section className="devs-hero-block">
-          <div className="devs-reticle tl"></div>
-          <div className="devs-reticle tr"></div>
-          <div className="devs-reticle bl"></div>
-          <div className="devs-reticle br"></div>
-
           <div className="devs-eyebrow">
-            <Terminal size={14} />
-            <span>SIH 26168 // ISRO DOS DOMAIN CADRE</span>
-            <span className="devs-pulse-dot"></span>
+            <Code2 size={14} />
+            <span>SIH 26168 // ISRO DOS DOMAIN</span>
           </div>
 
-          <h1 className="devs-title">The Engineering Team</h1>
+          <h1 className="devs-title">Project Developers</h1>
 
           <p className="devs-sub">
-            The multi-disciplinary engineering group behind AERIS — building autonomous, satellite-independent dead reckoning navigation for mission-critical and GNSS-denied environments.
+            The engineering team behind AERIS — developing autonomous, satellite-independent inertial dead reckoning navigation for mission-critical and GNSS-denied environments.
           </p>
 
           <div className="devs-meta-strip">
@@ -160,97 +184,87 @@ export const DevelopersPage: React.FC = () => {
               <span className="meta-val">ISRO / Department of Space</span>
             </div>
             <div className="devs-meta-item">
-              <span className="meta-label">ARCHITECTURE:</span>
+              <span className="meta-label">ALGORITHMS:</span>
               <span className="meta-val">15-State ES-EKF + RTS Smoother</span>
             </div>
             <div className="devs-meta-item">
-              <span className="meta-label">ACTIVE CADRE:</span>
-              <span className="meta-val highlight">6 Engineers</span>
+              <span className="meta-label">TEAM:</span>
+              <span className="meta-val highlight">6 Developers</span>
             </div>
           </div>
         </section>
 
         {/* Member Cards Grid */}
         <section className="devs-grid">
-          {MEMBERS.map((m, idx) => (
-            <div key={m.name} className="dev-card" style={{ '--card-accent': m.accent } as React.CSSProperties}>
-              <div className="dev-card-reticle tr"></div>
-              <div className="dev-card-reticle bl"></div>
-
-              {/* Card Header */}
+          {DEVELOPERS.map((dev) => (
+            <div key={dev.name} className="dev-card">
+              {/* Card Header: Avatar + Identity */}
               <div className="dev-card-head">
-                <div className="dev-card-badge">
-                  {m.icon}
-                  <span>{m.badge}</span>
+                <div className="dev-avatar-wrap">
+                  <DevAvatar src={dev.avatar} name={dev.name} />
                 </div>
-                <div className="dev-card-idx">0{idx + 1} // CADRE</div>
-              </div>
-
-              {/* Member Identity */}
-              <div className="dev-card-id">
-                <h3 className="dev-card-name">{m.name}</h3>
-                <div className="dev-card-role">{m.role}</div>
-                <div className="dev-card-sub">{m.subtitle}</div>
+                <div className="dev-id-text">
+                  <h3 className="dev-card-name">{dev.name}</h3>
+                  <div className="dev-card-role">{dev.role}</div>
+                  <div className="dev-card-focus">{dev.focus}</div>
+                </div>
               </div>
 
               {/* Description */}
-              <p className="dev-card-desc">{m.description}</p>
+              <p className="dev-card-desc">{dev.description}</p>
 
-              {/* Metric Callout */}
+              {/* Key Metric */}
               <div className="dev-card-metric">
-                <span className="metric-k">{m.metrics.label}</span>
-                <span className="metric-v">{m.metrics.value}</span>
+                <span className="metric-k">{dev.metrics.label}</span>
+                <span className="metric-v">{dev.metrics.value}</span>
               </div>
 
-              {/* Skill Tags */}
+              {/* Tags */}
               <div className="dev-card-tags">
-                {m.tags.map((t) => (
+                {dev.tags.map((t) => (
                   <span key={t} className="dev-tag">
                     {t}
                   </span>
                 ))}
               </div>
 
-              {/* Bottom Actions */}
+              {/* Action Links: GitHub & LinkedIn */}
               <div className="dev-card-foot">
-                <div className="dev-social-slot">
-                  <span className="dev-verified">
-                    <CheckCircle2 size={12} /> VERIFIED CONTRIBUTOR
-                  </span>
-                </div>
-                <div className="dev-links">
-                  <a 
-                    href="https://github.com/anuragmishra5159/Intelligent_Dead_Reckoning_Navigation_System" 
-                    target="_blank" 
+                <a
+                  href={dev.github}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="dev-link-btn"
+                  title={`${dev.name} on GitHub`}
+                >
+                  <GithubIcon size={14} />
+                  <span>GitHub</span>
+                  <ExternalLink size={11} className="dev-link-ext" />
+                </a>
+
+                {dev.linkedin && (
+                  <a
+                    href={dev.linkedin}
+                    target="_blank"
                     rel="noreferrer"
-                    className="dev-link-btn"
-                    title="View GitHub Repository"
+                    className="dev-link-btn dev-link-linkedin"
+                    title={`${dev.name} on LinkedIn`}
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path>
-                      <path d="M9 18c-4.51 2-5-2-7-2"></path>
-                    </svg>
+                    <LinkedinIcon size={14} />
+                    <span>LinkedIn</span>
+                    <ExternalLink size={11} className="dev-link-ext" />
                   </a>
-                  <a 
-                    href="https://github.com/anuragmishra5159/Intelligent_Dead_Reckoning_Navigation_System/graphs/contributors" 
-                    target="_blank" 
-                    rel="noreferrer"
-                    className="dev-link-btn"
-                    title="Contributor Activity"
-                  >
-                    <Activity size={14} />
-                  </a>
-                </div>
+                )}
               </div>
             </div>
           ))}
         </section>
 
-        {/* Bottom Callout */}
+        {/* Bottom CTA Bar */}
         <section className="devs-bottom-bar">
           <div className="devs-bottom-text">
-            <h4>Ready to test the live dead reckoning engine?</h4>
-            <p>Experience 60 seconds of real-time satellite blackout simulation with 15-state ES-EKF sensor fusion.</p>
+            <h4>Experience the Navigation System in Action</h4>
+            <p>Test the 15-state ES-EKF and RTS Smoother through real-time satellite blackout simulation.</p>
           </div>
           <button className="devs-launch-action" onClick={() => handleNav('/portal')}>
             LAUNCH GNSS PORTAL →
