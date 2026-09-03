@@ -1,167 +1,291 @@
-# Intelligent Dead Reckoning Navigation System
+# AERIS
+**AI-Enhanced Resilient Inertial System**
 
-Smartphone-based vehicle navigation that keeps working through GNSS/NavIC outages (tunnels, urban canyons, jamming) using IMU sensor fusion, a hybrid classical + AI approach, and map-constrained positioning.
+> A smartphone-based intelligent dead-reckoning navigation system that maintains vehicle positioning during GNSS/GPS outages using inertial sensing, physics-based constraints, GNSS reliability assessment, and sensor fusion.
 
-Built for SIH 2026 — ISRO problem statement on ground vehicle positioning without OBD-II.
+Built for **Smart India Hackathon 2026**, addressing the ISRO problem statement on ground-vehicle positioning without OBD-II or dedicated vehicle hardware. *(Independent student project developed for SIH 2026 — not an official ISRO deliverable.)*
 
----
-
-## What this project does
-
-When a vehicle enters a tunnel or loses GPS signal, standard navigation systems freeze or jump. This system keeps tracking position using:
-- The phone's **motion sensors** (accelerometer + gyroscope)
-- **Physics constraints** — a car cannot slide sideways or fly vertically
-- An **Error-State Extended Kalman Filter** that fuses all information optimally
-- A **Rule-based GNSS Reliability Classifier** that detects when GPS is degraded
-
-The result: during a 60-second GPS blackout, our system achieves **66 m mean / 153 m max position error** — compared to **35 km drift** from raw sensor integration alone, and **5 km spike** from GPS-only with no backup.
+*Previously developed under the working name "Intelligent Dead Reckoning Navigation System" — AERIS is the project's identity going forward.*
 
 ---
 
-## Results (tested on IO-VNBD dataset, S-S3b sequence)
+## The Problem
 
-| Mode | Mean error | Max error | What it means |
-|---|---|---|---|
-| Raw IMU only | 13,658 m | 35,585 m | Drifts to another city |
-| GPS only | 193 m mean, **5 km spike** | 5,015 m | Collapses when GPS drops |
-| Physics constraints only | 628 m | 1,235 m | Surprisingly good — no GPS needed |
-| **Our full system** | **66 m** | **153 m** | Stable through the entire outage |
+Modern vehicle navigation depends heavily on GNSS/GPS. But GNSS can become unreliable or unavailable in:
 
-**99.5% improvement over raw IMU. 59% improvement over GPS-only.**
+- Tunnels
+- Urban canyons (dense high-rise areas)
+- Signal obstruction
+- Interference or jamming
+- Temporary satellite degradation
 
-Tested across 30s, 60s, and 120s simulated outages — results hold across all three.
+When that happens, conventional navigation can freeze, jump, or become inaccurate.
 
----
+**The key challenge:** How can a vehicle continue estimating its position when GNSS disappears — without depending on OBD-II or dedicated vehicle hardware?
 
-## Validation on a second, unseen sequence
+## Our Approach
 
-To confirm the results aren't tuned to one sequence, the exact same pipeline (zero parameter changes) was run on **S1** — a different, much longer (86 min vs. 11 min) driving sequence with more varied terrain including motorway segments.
-
-| Sequence | Full system — 60s outage | Notes |
-|---|---|---|
-| S3b (development) | 68.9 m mean / 153.4 m max | 11 min, town driving, repeated turns |
-| **S1 (unseen validation)** | **115.2 m mean / 718.7 m max** | 86 min, includes motorway |
-
-Results generalize — same order of magnitude on an independent sequence, and dramatically better than any single-component alternative on both. One honest finding: NHC-alone degrades more on S1's motorway segments than S3b's town driving (hard lateral-velocity constraint holds less well at higher speed), which is exactly why the full GNSS+NHC system — not NHC alone — is the actual contribution.
+AERIS uses a smartphone's own IMU sensors (accelerometer + gyroscope) combined with inertial navigation mathematics, physical constraints of how a ground vehicle actually moves, and an Error-State Extended Kalman Filter to maintain a continuous position estimate. A rule-based GNSS reliability layer continuously decides how much to trust incoming GPS data, so the system degrades gracefully instead of freezing or jumping when signal quality drops. The result: positioning that survives a real GNSS outage using nothing but phone-grade sensors.
 
 ---
 
-## Backend results (plots)
+## System Overview
 
-### 4-mode ablation — 60s outage
-![Ablation comparison](backend/exports/ablation_comparison.png)
-
-### Multi-scenario comparison (30s / 60s / 120s)
-![Multi-scenario](backend/exports/evaluation/multi_scenario_comparison.png)
-
-### GNSS Quality Classification
-![GNSS quality](backend/exports/evaluation/gnss_quality.png)
-
----
-
-## How it works (simple version)
-
-1. **Read sensor data** from the phone (accelerometer, gyroscope, GPS)
-2. **Convert to local coordinates** (flat metres, not degrees — safer for math)
-3. **Propagate position** using the strapdown INS equations (physics)
-4. **Correct errors** using the Kalman filter whenever GPS is available
-5. **Apply physics constraints** — lateral and vertical velocity must be near zero for a ground vehicle
-6. **Detect GPS quality** — classify each GPS reading as healthy/degraded/unavailable
-7. **Export trajectory** as JSON for the web visualization
-
----
-
-## Architecture
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full pipeline diagram and design decisions.
-
-Key components:
-- **15-state Error-State EKF** — position, velocity, attitude, accelerometer bias, gyroscope bias
-- **Nominal quaternion state** separate from error state (avoids Euler-angle singularities)
-- **Non-Holonomic Constraints (NHC)** — lateral and vertical velocity ≈ 0 in vehicle frame
-- **Rule-based GNSS Reliability Classifier** — satellite count, accuracy, position jump, EKF innovation
-- **4-mode ablation** — pure INS / INS+GNSS / INS+NHC / full, run simultaneously for comparison
-
----
-
-## Backend (done ✅)
-
-| Part | What | Status |
-|---|---|---|
-| Part I | IO-VNBD dataset loader (`data_loader.py`) | ✅ Done |
-| Part II | 15-state ES-EKF with NHC (`ins_ekf.py`) | ✅ Done |
-| Part III | Multi-scenario outage evaluation (`outage_analysis.py`) | ✅ Done |
-| Part V | Rule-based GNSS classifier (`gnss_detector.py`) | ✅ Done (integrated in outage_analysis.py) |
-
-## Frontend (in progress 🔄)
-
-| Part | What | Status |
-|---|---|---|
-| Part IV | Leaflet map + trajectory replay (Vite + React) | 🔄 In progress |
-| Part VI | Wire real JSON data into frontend | ⏳ Pending Part IV |
-| Part VII | Integration, polish, responsive | ⏳ Pending |
-| Part VIII | Deploy to Vercel | ⏳ Pending |
-
-## Planned improvements (time permitting)
-
-- Zero-velocity updates (ZUPT) when vehicle is stationary at stops
-- Adaptive GNSS noise — wire the quality classifier output into the EKF measurement noise
-- Validation on additional sequences to confirm results aren't cherry-picked
-
----
-
-## Dataset
-
-**IO-VNBD** (Onyekpe et al., Coventry University) — Inertial and Odometry Benchmark Dataset for Ground Vehicle Positioning. 100 hours of driving data, UK/Nigeria/France. Smartphone sensors at 10 Hz, GPS at 1 Hz.
-
-- Source: [github.com/onyekpeu/IO-VNBD](https://github.com/onyekpeu/IO-VNBD)
-- Sequence used: S-S3b / V-S3b (Driver A, Rugby — 11.4 min, repeated left/right turns)
-- V-* files = VBOX reference trajectory (dedicated GPS logger)
-- S-* files = smartphone input (what our system actually processes)
-
-See [`docs/DATASET.md`](docs/DATASET.md) for full column reference and terminology decisions.
-
----
-
-## Docs
-- [`docs/PROJECT_BRIEF.md`](docs/PROJECT_BRIEF.md) — problem, approach, team, current status
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full pipeline, module breakdown, MVP scope, presentation website stack
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — 3-day MVP sprint + full production arc
-- [`docs/PROJECT_LOG.md`](docs/PROJECT_LOG.md) — running decision log, updated every session
-- [`docs/DATASET.md`](docs/DATASET.md) — IO-VNBD column reference, terminology, MVP sequence choice
-- [`docs/FRONTEND_INTEGRATION.md`](docs/FRONTEND_INTEGRATION.md) — what's real vs. still-fake in the frontend, full history of the data-wiring fixes
-- [`docs/RULES.md`](docs/RULES.md) — team working rules; **read before your first push**
-- [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) — git workflow for collaborators
-- [`requirements.txt`](requirements.txt) — backend Python dependencies
-
----
-
-## Running the backend
-
-```bash
-# 1. Clone this repo and the dataset
-git clone https://github.com/Ayaan-Patel018/Intelligent_Dead_Reckoning_Navigation_System.git
-git clone https://github.com/onyekpeu/IO-VNBD.git
-
-# 2. Set up environment
-python -m venv nav-env
-nav-env\Scripts\activate   # Windows
-pip install -r requirements.txt
-
-# 3. Run the data loader (Part I)
-cd backend
-python data_loader.py
-
-# 4. Run the EKF pipeline (Part II — 4-mode ablation)
-python ins_ekf.py
-
-# 5. Run multi-scenario evaluation + GNSS classifier (Parts III + V)
-python outage_analysis.py
+```mermaid
+flowchart TD
+    A[Smartphone Sensors<br/>Accelerometer + Gyroscope + GNSS] --> B[Sensor Processing]
+    B --> C[Strapdown INS]
+    C --> D[Error-State EKF]
+    D --> E[GNSS Quality<br/>Assessment]
+    D --> F[Vehicle Motion<br/>Constraints]
+    E --> G[Fused State]
+    F --> G
+    G --> H[Dead-Reckoned<br/>Trajectory]
+    H --> I[Web Frontend<br/>Map + Trajectory Visualization]
 ```
 
-All plots save to `backend/exports/`. JSON files for the frontend are in `backend/exports/evaluation/outage_60s/`.
+**Sensors → Intelligence/Fusion → Position Estimate → Frontend.**
+
+---
+
+## Core Algorithms & Intelligence
+
+AERIS is not "GPS plus an accelerometer." Every component below is genuinely implemented and tested — not planned, not simulated.
+
+**Strapdown Inertial Navigation System (INS)** — IMU measurements are integrated to propagate position, velocity, and orientation forward in time. This is what keeps the system moving when GNSS goes silent.
+
+**15-State Error-State Extended Kalman Filter (ES-EKF)** — Rather than tracking raw position/velocity/attitude directly, the filter tracks the *error* in each: position (3), velocity (3), attitude (3), accelerometer bias (3), gyroscope bias (3). This is the mathematically correct formulation for navigation filtering — it avoids attitude singularities and stays numerically stable through sharp turns.
+
+**Quaternion Attitude Representation** — Orientation is stored as a quaternion rather than raw Euler angles, avoiding gimbal-lock singularities that would otherwise corrupt heading during aggressive maneuvers.
+
+**Non-Holonomic Constraints (NHC)** — A ground vehicle cannot slide sideways or fly vertically. This physical fact is fed into the filter as a correction whenever GNSS is degraded or unavailable, and alone accounts for the majority of drift reduction during an outage.
+
+**Zero-Velocity Update (ZUPT)** — When the vehicle is confirmed stationary (e.g. at a traffic light), velocity is known to be exactly zero. This corrects accumulated velocity drift for free.
+
+**Zero Angular-Rate Update (ZARU)** — At the same confirmed-stationary moments, the gyroscope reading is almost entirely bias. This directly corrects gyroscope bias, bounding heading drift over the following stretch of driving.
+
+**Rule-Based GNSS Reliability Classifier** — Every GPS reading is assessed using satellite count, reported accuracy, position-jump magnitude, and the EKF's own innovation (how far a GPS fix is from what the filter predicted). Readings are labeled healthy / degraded / unavailable, and the filter's trust in GPS scales accordingly.
+
+**Outage Simulation & Multi-Scenario Evaluation** — GNSS outages are deliberately simulated at multiple durations (30s / 60s / 120s) on real recorded driving data, so the system's behavior under signal loss can be measured directly rather than assumed.
+
+**RTS (Rauch-Tung-Striebel) Offline Smoother** — A backward post-processing pass over a completed, recorded drive. Because it can use information from *after* an outage ends (GNSS reacquisition) to refine the estimate *during* the outage, it produces a measurably tighter trajectory than the real-time filter — but it is explicitly an offline analysis capability, not something a live phone could compute, and is presented as a clearly separate layer for exactly that reason.
+
+---
+
+## How AERIS Works
+
+1. **Smartphone sensing** — Read accelerometer, gyroscope, and GNSS data (IMU at ~10 Hz, GNSS at ~1 Hz).
+2. **Inertial propagation** — IMU measurements continuously propagate position, velocity, and attitude forward.
+3. **GNSS assessment** — Each GNSS reading is classified healthy / degraded / unavailable.
+4. **Error correction** — The 15-state ES-EKF estimates and corrects navigation errors using whichever measurements are currently available.
+5. **Vehicle motion constraints** — NHC (lateral/vertical velocity ~ 0) and ZUPT/ZARU (at confirmed stops) apply whenever relevant.
+6. **Continuous positioning** — When GNSS is available, it corrects drift. When GNSS disappears, inertial propagation plus vehicle constraints carry the trajectory forward.
+7. **Frontend visualization** — The resulting trajectory is exported as JSON and consumed by the web frontend for interactive replay and comparison.
+
+---
+
+## Dataset: IO-VNBD
+
+AERIS is developed and evaluated on **IO-VNBD** (Inertial and Odometry Benchmark Dataset for Ground Vehicle Positioning; Onyekpe et al., Coventry University) - approximately 100 hours of real driving across the UK, Nigeria, and France, recorded with both a dedicated vehicle logger and a smartphone.
+
+- **`V-*` files** — from a dedicated VBOX GPS+CAN logger. Used **only as a reference trajectory for evaluation.** We deliberately call this "reference," not "ground truth" — it is a dedicated GPS logger, not RTK-grade, and we do not overclaim its precision.
+- **`S-*` files** — from a smartphone (AndroSensor app) mounted in the vehicle. This is the **actual input AERIS processes** — it is exactly what a real phone would see, matching the problem statement directly.
+
+**Sequences used:** `S3b` (Driver A, Rugby — 11.4 minutes, repeated turns, used for development) and `S1` (Driver A, Coventry — 86 minutes, used as an **unseen validation sequence**, evaluated once with zero parameter changes).
+
+Full column reference and terminology decisions: [`docs/DATASET.md`](docs/DATASET.md).
+
+### Original IO-VNBD reference material
+
+The dataset's own paper documents the smartphone's sensor axis convention and its physical placement in the vehicle — both directly relevant to how AERIS interprets raw IMU readings (this is the exact axis convention that determines correct gyroscope-to-body-frame mapping in the INS).
+
+> **Smartphone sensor axis convention (IO-VNBD paper, Figure 2)**
+> ![Smartphone sensor axis](docs/assets/io-vnbd-phone-sensor-axis.jpg)
+
+> **Sensor placement and vehicle dimensions (IO-VNBD paper, Figure 3)**
+> ![Vehicle sensor placement](docs/assets/io-vnbd-vehicle-sensor-placement.jpg)
+
+*(The IO-VNBD paper does not include a plotted reference-trajectory figure — the images above are the genuinely relevant original figures it contains.)*
+
+---
+
+## From Sensor Data to a Working Navigation Interface
+
+The backend processes smartphone sensor data, performs navigation estimation and outage evaluation, and exports the resulting trajectory as structured JSON. The frontend consumes this generated data and renders the vehicle trajectory on an interactive map, over real map tiles, with the vehicle's actual GPS coordinates.
+
+> **AERIS dashboard — live trajectory replay on real map tiles (Rugby, UK — S3b sequence)**
+> ![AERIS dashboard demo](docs/assets/aeris-dashboard-demo.jpg)
+>
+> Teal (dashed) = reference trajectory · Orange = AERIS real-time fused output · Purple = offline RTS-refined trajectory. The visible divergence in the upper section is the simulated GNSS outage window — exactly where dead reckoning is doing the work.
+
+```mermaid
+flowchart LR
+    A[IO-VNBD Smartphone Data] --> B[Python Navigation Backend]
+    B --> C[INS + ES-EKF + NHC]
+    C --> D[GNSS Reliability Assessment]
+    D --> E[Trajectory Evaluation]
+    E --> F[JSON Export]
+    F --> G[React Frontend]
+    G --> H[Interactive Map / Trajectory Replay]
+```
+
+The frontend currently renders **four independently toggleable layers**: the reference trajectory, raw smartphone GNSS, the real-time AERIS fused output, and the offline RTS-refined trajectory (clearly labeled as post-processed, not live).
+
+---
+
+## Results
+
+All figures below are from the `S3b` development sequence, 60-second simulated GNSS outage, unless stated otherwise.
+
+| Approach | Mean Error | Max Error | What it shows |
+|---|---|---|---|
+| Raw inertial only (no correction) | ~12,600 m | ~29,000 m | Uncorrected sensor drift makes the vehicle "arrive" kilometres from reality within a minute |
+| **AERIS - Real-Time** (ES-EKF + NHC + GNSS classifier) | **85.8 m** | **179.3 m** | Causal — exactly what a live phone running this system could compute |
+| **AERIS - Offline-Refined** (+ RTS smoothing + ZARU) | **51.9 m** | **137.2 m** | Post-processed using the complete recorded drive — analysis capability, not a live claim |
+
+> On a phone-only sensor budget (no wheel odometry, no OBD-II — the exact constraint this problem requires), raw inertial navigation is effectively unusable within a minute of GNSS loss. AERIS's real-time system keeps the vehicle positioned within roughly two football fields of the truth through the same outage.
+
+### Validation on an unseen sequence
+
+The same pipeline, with **zero parameter changes**, was evaluated on `S1` — a second, independent 86-minute sequence never used during development.
+
+| Sequence | Duration | Role | Real-Time Mean Error | Offline-Refined Mean Error |
+|---|---|---|---|---|
+| S3b | 11.4 min | Development | 85.8 m | 51.9 m |
+| **S1** | 86 min | **Unseen validation** | 166.5 m | **51.5 m** |
+
+The offline-refined result lands at nearly the same absolute accuracy on both sequences (51.9 m vs. 51.5 m) despite S1 being eight times longer and never tuned on. This is evidence the approach generalizes to conditions it wasn't developed against — not a claim of universal generalization beyond what was actually tested.
+
+### Multi-duration outage testing
+
+The system was additionally evaluated with simulated GNSS outages of **30, 60, and 120 seconds** on the development sequence, to confirm results are not specific to one arbitrarily chosen outage length. *(Full current numbers: regenerate with `python backend/outage_analysis.py` and see [`docs/PROJECT_LOG.md`](docs/PROJECT_LOG.md) for the most recent run.)*
+
+---
+
+## Why AERIS Matters
+
+- **No OBD-II dependency** — designed entirely around smartphone sensing.
+- **GNSS-outage resilience** — continues estimating position using inertial sensing and vehicle constraints, not just GPS.
+- **Hybrid approach** — combines classical navigation and filtering theory with a GNSS reliability intelligence layer.
+- **Evidence-driven evaluation** — tested across multiple outage durations and validated on an unseen sequence, not just demoed once.
+
+## What Makes Our Approach Different
+
+**GNSS-only** — Accurate when GNSS is healthy, but vulnerable and effectively blind during outages or degradation.
+
+**Raw inertial dead reckoning** — Can operate without GNSS, but errors accumulate rapidly (position error grows with the square of time for a constant sensor bias).
+
+**AERIS** — Combines inertial propagation, GNSS corrections when reliable, GNSS reliability assessment, vehicle motion constraints, and error-state Kalman filtering into one system that degrades gracefully instead of failing outright.
+
+---
+
+## Technical Architecture
+
+AERIS's backend converts GNSS coordinates to a local ENU (East-North-Up) metre-based frame before any filtering, so the estimator never mixes degrees and metres. A strapdown INS propagates the nominal navigation state (position, velocity, quaternion attitude, accelerometer/gyroscope bias) using raw IMU measurements. A 15-state error-state EKF estimates and corrects errors in that state using whichever measurements are currently available — GNSS position/velocity, non-holonomic constraints, or zero-velocity/zero-angular-rate updates at confirmed stops. A rule-based classifier continuously assesses GNSS reliability and scales the filter's trust in incoming GPS accordingly. Outage scenarios are simulated directly on recorded data for controlled evaluation, and an offline RTS smoother provides a separate, clearly-labeled refined trajectory using the complete recorded drive. Results are exported as structured JSON and consumed by a React/Vite/Leaflet frontend for interactive map-based replay.
+
+Full mathematical derivations, state definitions, and covariance propagation details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+---
+
+## What We Built
+
+| Component | What it does | Status |
+|---|---|---|
+| IO-VNBD data pipeline | Loads and processes smartphone/reference sensor data | Done |
+| Strapdown INS | Propagates the inertial navigation state | Done |
+| 15-state ES-EKF | Estimates and corrects navigation errors | Done |
+| Quaternion attitude | Stable orientation representation, no singularities | Done |
+| Non-Holonomic Constraints | Constrains physically impossible vehicle motion | Done |
+| ZUPT / ZARU | Corrects velocity and gyro-bias drift at confirmed stops | Done |
+| GNSS Reliability Classifier | Detects degraded/unavailable GNSS, scales filter trust | Done |
+| Outage evaluation (30/60/120s) | Tests controlled GNSS outages on real data | Done |
+| RTS offline smoother | Post-processed, clearly-labeled refined trajectory | Done |
+| JSON trajectory export | Supplies navigation output to the frontend | Done |
+| Frontend map (Leaflet, real tiles) | Interactive trajectory replay, 4 toggleable layers | Done |
+| Backend to Frontend integration | Frontend consumes real, verified backend-generated data | Done |
+| 161-test automated suite | Covers math, INS, EKF mechanics, classifier, pipeline, JSON schema | Done |
+
+---
+
+## Repository Structure
+
+```
+AERIS/
+|-- backend/           # Python navigation pipeline (INS, ES-EKF, evaluation, tests)
+|   |-- tests/          # 161-test automated suite
+|   `-- exports/         # Generated trajectory JSON and evaluation results
+|-- frontend/          # React + Vite + Leaflet interactive dashboard
+|-- docs/              # Architecture, dataset reference, project log, and other documentation
+|-- requirements.txt   # Backend Python dependencies
+`-- README.md
+```
+
+---
+
+## Current Status
+
+**Completed**
+- Full backend navigation pipeline (INS, ES-EKF, NHC, ZUPT/ZARU, GNSS classifier)
+- Offline RTS smoothing with a locked, honest real-time/offline presentation split
+- Frontend dashboard with real backend data across all four trajectory layers
+- Evaluation on a development sequence and an independent unseen validation sequence
+- Automated test suite (161 tests)
+
+**Demonstrated**
+- Generalization from an 11-minute development sequence to an 86-minute unseen sequence with zero parameter re-tuning
+- Graceful degradation under simulated GNSS outages of varying duration
+
+**Future Work** *(intentionally outside current MVP scope, not missing core functionality)*
+- On-device Android sensor capture (current scope is dataset-driven, not live-phone)
+- HMM-based map matching to constrain position to the road network
+- Fixed-lag smoothing to bring part of the offline-refinement benefit closer to real time
+- Magnetometer-aided heading correction (deferred — in-vehicle magnetic distortion is a real risk, not attempted for this MVP)
+
+---
+
+## Documentation
+
+- [`docs/PROJECT_BRIEF.md`](docs/PROJECT_BRIEF.md) — problem, approach, and status
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full pipeline, module breakdown, math
+- [`docs/ROADMAP.md`](docs/ROADMAP.md) — sprint plan and production roadmap
+- [`docs/PROJECT_LOG.md`](docs/PROJECT_LOG.md) — chronological decision log
+- [`docs/DATASET.md`](docs/DATASET.md) — IO-VNBD column reference and terminology
+- [`docs/FRONTEND_INTEGRATION.md`](docs/FRONTEND_INTEGRATION.md) — frontend data-wiring history and status
+- [`docs/RTS_SMOOTHING_PLAN.md`](docs/RTS_SMOOTHING_PLAN.md) — offline smoothing design and evaluation
+- [`docs/RULES.md`](docs/RULES.md) — team working rules
+- [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) — git workflow for collaborators
+
+---
+
+## Running the Project
+
+```bash
+# Clone this repo and the dataset
+git clone https://github.com/Ayaan-Patel018/Intelligent_Dead_Reckoning_Navigation_System.git AERIS
+git clone https://github.com/onyekpeu/IO-VNBD.git
+
+cd AERIS
+
+# Backend
+python -m venv nav-env
+nav-env\Scripts\activate      # Windows
+pip install -r requirements.txt
+
+cd backend
+python data_loader.py          # Part I - data loading sanity check
+python ins_ekf.py              # Part II - 4-mode ablation
+python outage_analysis.py      # Part III - multi-scenario evaluation
+python rts_evaluation.py       # Offline RTS + ZARU evaluation
+python run_tests.py --verbose  # 161-test suite
+
+# Frontend
+cd ../frontend
+npm install
+npm run dev
+```
 
 ---
 
 ## License
+
 MIT — see [LICENSE](LICENSE).
