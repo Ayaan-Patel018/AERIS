@@ -273,3 +273,44 @@ Same order of magnitude, not identical (expected/good). "Not cherry-picked" evid
 
 **Decided:** The map tile integration provides genuine geographical context without compromising 60 FPS trajectory playback or data honesty.
 
+---
+
+## 2026-09-03 — End-to-End Frontend Layer Verification (All 4 Layers, Zero-Layer Bug Fix, RTS Default OFF, 1x Playback)
+
+**Did:**
+- Executed full automated end-to-end browser test on `/portal` verifying all merged frontend work.
+- **Layer Toggles & Disappearance Bug Fix:** Tested all 4 layers individually. Confirmed each layer's line (Ground Truth, GNSS Only, AERIS Fused, RTS Smoothed) toggles cleanly. Confirmed that when all 4 layers are turned OFF, the vehicle marker disappears completely from the canvas with zero silent fallback to hidden layers.
+- **RTS Smoothed Default:** Confirmed RTS Smoothed layer defaults to OFF on initial page load; vehicle marker starts in real-time cyan/teal (`#2DD4BF`), never purple.
+- **Caption Text & Encoding:** Confirmed RTS Smoothed caption renders cleanly with proper em-dash without character corruption: *"Post-processed using the complete recorded drive — not available to a live system."*
+- **1x Real-Time Playback & Diagnostics:** Executed full playback at 1x speed. Telemetry metrics (Heading, Pos Error, Confidence, ES-EKF estimator) and dual charts (Position Error Over Time, Velocity Comparison) rendered smoothly with 0 console errors/warnings.
+
+---
+
+## 2026-09-03 (Evening) — UI/UX Overhaul (Zero Glassmorphism) & Dedicated Developer Cadre Page (/developers)
+
+**Did:**
+- **Zero Glassmorphism Defense-Tech Design:** Completely eliminated all frosted glass / backdrop blur effects. Implemented solid, razor-sharp dark surfaces (`#0A0A0B`, `#111114`, `#16161A`), technical corner reticles (`+`), illuminated LED lamps, and high-contrast typography (`Space Grotesk`, `JetBrains Mono`, `Inter`).
+- **Dedicated Developer Cadre Page (`/developers`):** Created full-featured developer cadre page with dedicated cards for all 6 team members verbatim:
+  1. **Anurag Mishra** — Team Lead / Navigation Algorithms
+  2. **Ayaan Patel** — AI/ML Kinematics & Offline Smoothing
+  3. **Aryan Badoriya** — Systems Integration & Telemetry Cockpit
+  4. **Ananya Sharma** — Data Engineering & GNSS Pipelines
+  5. **Shreya Zutshi** — Validation Engineering & Statistical Testing
+  6. **Ananya Tiwari** — Quality Assurance & Embedded Modeling
+- **Navbar & Navigation Wiring:** Added high-visibility `"Developers"` button on both Landing Page and Cockpit navbars, as well as reciprocal link in TopBar and AboutSection.
+- **Cockpit Instruments Elevated:**
+  - Added `MET T+mm:ss` mission clock and live WGS-84 coordinate ticker (`LAT ... LON ...`).
+  - Added 5-segment solid RF signal strength meter with active LED lamps.
+  - Added Directional Gyro Compass widget with rotating needle and cardinal points.
+  - Replaced checkboxes with physical tactile cockpit rocker switches in Legend.
+  - Added guarded blackout hazard switch with diagonal stripes.
+  - Added live playhead tracking line in dual oscilloscope charts.
+  - Added top-right orientation Compass Rose reticle on map.
+- **Landing Page Upgraded:**
+  - Added authentic military radar scope canvas with sweeping beam and target blips.
+  - Added solid live telemetry terminal card in hero section.
+  - Upgraded Problem, Solution, and How It Works modules with technical specification modal and authentic instrument preview bezel.
+- **Verification:** Vite build passes in 904ms (`✓ built in 904ms`). Comprehensive browser subagent audit verified all flows (`ui_ux_devs_audit_1788443338429.webp`). All changes committed and pushed to `origin/main`.
+
+
+

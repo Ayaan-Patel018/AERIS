@@ -1,31 +1,66 @@
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import { PlaybackControls } from './PlaybackControls';
 import { TimelineSlider } from './TimelineSlider';
-import { ChartsPanel } from './ChartsPanel';
 import { useDashboardContext } from '../../context/DashboardContext';
+import { Zap } from 'lucide-react';
 
 export const BottomBar: React.FC = () => {
-  const [chartsOpen, setChartsOpen] = useState(false);
-  const { speed, setSpeed } = useDashboardContext();
+  const { speed, setSpeed, isPlaying, setIsPlaying, setProgress, simulateOutage, setSimulateOutage } = useDashboardContext();
 
-  const cycleSpeed = () => {
-    const opts = [0.5, 1, 2, 4];
-    const next = opts[(opts.indexOf(speed) + 1) % opts.length];
-    setSpeed(next);
-  };
+  const speeds = [0.5, 1, 2, 4];
+
+  // Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setIsPlaying(!isPlaying);
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        setProgress((prev) => Math.min(1, prev + 0.02));
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        setProgress((prev) => Math.max(0, prev - 0.02));
+      } else if (e.key === 'o' || e.key === 'O') {
+        e.preventDefault();
+        setSimulateOutage(!simulateOutage);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPlaying, setIsPlaying, setProgress, simulateOutage, setSimulateOutage]);
 
   return (
-    <>
-      <ChartsPanel isOpen={chartsOpen} />
-      
-      <div className="portal-bottom">
-        <PlaybackControls />
-        <TimelineSlider />
-        <button className="spd-btn" onClick={cycleSpeed}>{speed}×</button>
-        <button className="expand-btn" onClick={() => setChartsOpen(!chartsOpen)}>
-          CHARTS {chartsOpen ? '▼' : '▲'}
-        </button>
+    <div className="portal-bottom-bar">
+      <PlaybackControls />
+      <TimelineSlider />
+
+      {/* Speed Selector */}
+      <div className="speed-pill-group">
+        {speeds.map((s) => (
+          <button
+            key={s}
+            className={`speed-pill-btn ${speed === s ? 'active' : ''}`}
+            onClick={() => setSpeed(s)}
+            title={`Speed: ${s}×`}
+          >
+            {s}×
+          </button>
+        ))}
       </div>
-    </>
+
+      {/* Outage Simulation Switch */}
+      <button 
+        className={`outage-toggle-btn ${simulateOutage ? 'active-outage' : ''}`}
+        onClick={() => setSimulateOutage(!simulateOutage)}
+        title="Simulate GNSS Outage [O]"
+      >
+        <Zap size={13} />
+        <span>{simulateOutage ? 'RESTORE GNSS' : 'SIMULATE OUTAGE'}</span>
+      </button>
+    </div>
   );
 };

@@ -1,35 +1,63 @@
 import React from 'react';
+import { Eye, Zap, Shield, ArrowRight } from 'lucide-react';
 
 export const SolutionSection: React.FC = () => {
   return (
     <section id="solution" className="container">
-      <div style={{ padding: '120px 48px' }}>
-        <div className="eyebrow rev in">THE SOLUTION</div>
-        <h2 className="sec-title rev d1 in">A seamless handoff to onboard sensors.</h2>
+      <div style={{ padding: '96px 48px 48px' }}>
+        <div className="eyebrow rev in">ARCHITECTURAL SOLUTION</div>
+        <h2 className="sec-title rev d1 in">Zero-Latency Inertial Sensor Handoff</h2>
+        <p className="prob-bridge rev d2 in" style={{ marginBottom: 0 }}>
+          When external radio signals collapse, AERIS executes a seamless, deterministic transition to self-contained onboard strapdown inertial navigation.
+        </p>
       </div>
       
       <div className="sol-grid" style={{ position: 'relative', borderBottom: '1px solid var(--line)' }}>
         <div className="b-dot tl"></div><div className="b-dot tr"></div>
         <div className="b-dot bl"></div><div className="b-dot br"></div>
+        
+        {/* Step 01 */}
         <div className="step rev d1 in" style={{ position: 'relative' }}>
           <div className="b-dot tr"></div><div className="b-dot br"></div>
-          <div className="step-num">STEP 01</div>
-          <div className="step-tag">DETECT</div>
-          <h3>Signal Lost</h3>
-          <p>AERIS constantly monitors incoming satellite data. It knows the exact instant the signal weakens or degrades beyond reliability — no external input needed.</p>
+          <div className="step-badge-row">
+            <span className="step-num">STEP 01</span>
+            <span className="step-tag-pill ok">AUTONOMOUS AUDIT</span>
+          </div>
+          <div className="step-ic-box">
+            <Eye size={20} color="var(--status-ok)" />
+          </div>
+          <h3>Receiver Outage Detection</h3>
+          <p>A statistical Innovation Monitor audits incoming satellite covariance and carrier-to-noise metrics. The exact millisecond of signal degradation triggers the outage flag instantly.</p>
+          <div className="step-meta-foot">LATENCY &lt; 10ms // ZERO EXTERNAL OVERHEAD</div>
         </div>
+
+        {/* Step 02 */}
         <div className="step rev d2 in" style={{ position: 'relative' }}>
           <div className="b-dot tr"></div><div className="b-dot br"></div>
-          <div className="step-num">STEP 02</div>
-          <div className="step-tag">SWITCH</div>
-          <h3>Inertial Mode</h3>
-          <p>Within milliseconds, the system hands control to the vehicle's own internal motion sensors. These sensors are immune to external blocking or jamming.</p>
+          <div className="step-badge-row">
+            <span className="step-num">STEP 02</span>
+            <span className="step-tag-pill warn">STRAPDOWN SWITCH</span>
+          </div>
+          <div className="step-ic-box">
+            <Zap size={20} color="var(--orange)" />
+          </div>
+          <h3>100 Hz Strapdown Propagation</h3>
+          <p>Inertial sensors (3-axis accelerometer, 3-axis rate gyroscope) take complete control of nominal attitude and velocity propagation using quaternion kinematics.</p>
+          <div className="step-meta-foot">100 Hz SAMPLING // UNJAMMABLE PHYSICS</div>
         </div>
+
+        {/* Step 03 */}
         <div className="step rev d3 in">
-          <div className="step-num">STEP 03</div>
-          <div className="step-tag">HOLD</div>
-          <h3>Position Held</h3>
-          <p>Speed, heading, and acceleration data are mathematically fused to project the vehicle's ongoing path. The navigation dot never stops tracking.</p>
+          <div className="step-badge-row">
+            <span className="step-num">STEP 03</span>
+            <span className="step-tag-pill ok">FUSION CORRECTION</span>
+          </div>
+          <div className="step-ic-box">
+            <Shield size={20} color="var(--status-ok)" />
+          </div>
+          <h3>15-State Error-State EKF</h3>
+          <p>The Kalman filter blends kinematic velocity predictions and zero-velocity constraints to continuously arrest sensor bias drift, holding sub-meter accuracy until satellites return.</p>
+          <div className="step-meta-foot">JOSEPH-FORM COVARIANCE // ZERO POS JUMP</div>
         </div>
       </div>
     </section>

@@ -1,25 +1,46 @@
 import React, { useEffect, useState } from 'react';
+import { Cpu, Shield, Layers, RefreshCw, X, ArrowRight, ExternalLink } from 'lucide-react';
 
 const MD: Record<string, any> = {
   imu: {
-    title: 'Sensor Inputs', color: '#2DD4BF', tag: 'INPUT',
-    desc: 'Raw inertial measurements are the only sensor that keeps working in all outage scenarios — tunnels, jamming, spoofing. The IMU is the backbone of dead-reckoning, augmented by GNSS when available.',
-    rows: [['IMU Rate', '100 Hz'], ['GNSS Rate', '1 Hz'], ['Filter', 'Zero-phase Butterworth'], ['Calibration', 'Online bias via EKF state']]
+    title: 'Sensor Inputs & Strapdown IMU', color: '#2DD4BF', tag: 'INPUT // 100 Hz',
+    desc: 'Raw inertial measurements (3-axis accelerometer, 3-axis rate gyroscope) are the unjammable backbone of dead reckoning, augmented by GNSS when satellites are visible.',
+    rows: [
+      ['Sampling Rate', '100 Hz IMU / 1 Hz GNSS'],
+      ['Attitude Representation', 'Unit Quaternion (Hamilton)'],
+      ['Noise Handling', 'Online bias estimation in EKF state'],
+      ['Coordinate Frame', 'WGS-84 to Local ENU (East-North-Up)']
+    ]
   },
   ai: {
-    title: 'AI Velocity Estimator', color: '#F0801E', tag: 'AI/ML',
-    desc: 'Learns the mapping from IMU motion patterns to velocity. Trained on drive sessions with GNSS ground truth.',
-    rows: [['Architecture', '1D CNN → Flatten → Dense'], ['Parameters', '2.1 M'], ['Output', '[vx, vy] m/s'], ['RMSE', '0.4 m/s']]
+    title: 'AI Kinematic Velocity Model', color: '#F0801E', tag: 'AI/ML // INFERENCE',
+    desc: 'Learns non-linear vehicle motion patterns from high-rate inertial signals to predict forward and lateral velocity when wheel odometry is unavailable.',
+    rows: [
+      ['Model Architecture', '1D CNN Feature Extractor → BiGRU'],
+      ['Training Sequences', 'Oxford / Rugby IO-VNBD Datasets'],
+      ['Inference Output', 'Planar Velocity Vector [vx, vy] m/s'],
+      ['Runtime Overhead', '< 2.5ms on Edge Compute']
+    ]
   },
   ekf: {
-    title: 'Extended Kalman Filter', color: '#8B5CF6', tag: 'FUSION',
-    desc: 'The fusion backbone. In GNSS-healthy mode it corrects IMU drift. In outage mode it integrates AI velocity and gyro heading continuously.',
-    rows: [['State', '[x, y, vx, vy, hdg]'], ['Update (GNSS)', 'GPS observation matrix'], ['Update (DR)', 'AI vel + heading'], ['Covariance', 'Adaptive Q/R']]
+    title: '15-State Error-State Kalman Filter', color: '#5EEAD4', tag: 'FUSION // 15-STATE',
+    desc: 'The primary estimation core. Propagates nominal state on manifold using quaternion kinematics, while updating the 15-dimensional error state via Joseph-form covariance updates.',
+    rows: [
+      ['State Vector', 'δp (3), δv (3), δθ (3), δba (3), δbg (3)'],
+      ['Attitude Self-Propagation', 'Incorporated into Error Transition Matrix F'],
+      ['Covariance Form', 'Joseph-stabilized: P = (I-KH)P(I-KH)ᵀ + KRKᵀ'],
+      ['Constraint Updates', 'ZARU (Zero Angular Rate) + ZUPT']
+    ]
   },
-  out: {
-    title: 'Fused Position Output', color: '#2DD4BF', tag: 'OUTPUT',
-    desc: 'Continuous output — never freezes, never jumps. When GNSS returns the filter converges smoothly over 1–3 epochs.',
-    rows: [['Rate', '10 Hz'], ['Format', 'WGS-84 lat/lon + alt'], ['Interface', 'NMEA / JSON stream'], ['60 s Error', '< 3 m (fused) vs 450 m']]
+  rts: {
+    title: 'Rauch-Tung-Striebel Offline Smoother', color: '#A855F7', tag: 'ANALYSIS // RTS POST-PASS',
+    desc: 'Backward post-processing pass over forward filter estimates. Combines full mission history to produce the mathematically optimal trajectory for retrospective analysis.',
+    rows: [
+      ['Algorithm', 'Rauch-Tung-Striebel (RTS) Backward Smoother'],
+      ['Gain on S3b (Tuning)', '−39.5% Mean Position Error (85.8m → 51.9m)'],
+      ['Gain on S1 (Unseen)', '−69.1% Mean Position Error (166.5m → 51.5m)'],
+      ['Mathematical Scope', 'Offline ground-truth recovery (not live guidance)']
+    ]
   },
 };
 
@@ -40,85 +61,105 @@ export const HowItWorks: React.FC = () => {
     <>
       <section id="tech" className="container" style={{ borderTop: '1px solid var(--line)' }}>
         <div className="b-dot tl"></div><div className="b-dot tr"></div>
-        <div style={{ padding: '120px 48px 48px' }}>
-          <div className="eyebrow rev in">THE TECHNOLOGY</div>
-          <h2 className="sec-title rev d1 in">AI-powered sensor fusion.</h2>
+        <div style={{ padding: '96px 48px 48px' }}>
+          <div className="eyebrow rev in">ENGINEERING ARCHITECTURE</div>
+          <h2 className="sec-title rev d1 in">15-State Error-State Sensor Fusion</h2>
           <p className="prob-bridge rev d2 in" style={{ marginBottom: 0 }}>
-            By combining classical Extended Kalman Filters with lightweight machine learning models, AERIS translates raw vehicle motion into a highly accurate continuous trajectory.
+            AERIS fuses classical Kalman filtering with deep kinematic modeling to translate high-frequency inertial sensor physics into a mathematically optimal, divergence-resistant vehicle trajectory.
           </p>
         </div>
 
+        {/* Tactical Pipeline Connector */}
         <div className="arch-strip" style={{ position: 'relative', borderBottom: '1px solid var(--line)' }}>
           <div className="b-dot bl"></div><div className="b-dot br"></div>
           <svg id="archSvg" height="44" style={{ display: 'block', width: '100%', overflow: 'visible' }}>
-            {/* React SVG implementation of the animated strip */}
             {[0.125, 0.375, 0.625, 0.875].map((x, i, arr) => (
               <g key={`arch-strip-${i}`}>
                 {i < arr.length - 1 && (
                   <>
                     <line x1={`${x * 100}%`} y1="22" x2={`${arr[i+1] * 100}%`} y2="22" stroke="#26262B" strokeWidth="1" />
-                    <circle r="3" fill={['#2DD4BF', '#F0801E', '#8B5CF6', '#2DD4BF'][i]}>
+                    <circle r="3" fill={['#2DD4BF', '#F0801E', '#5EEAD4', '#A855F7'][i]}>
                       <animateMotion dur={`${1.6 + i * 0.3}s`} repeatCount="indefinite" path={`M0,22 L1000,22`} />
                     </circle>
                   </>
                 )}
-                <circle cx={`${x * 100}%`} cy="22" r="4" fill={['#2DD4BF', '#F0801E', '#8B5CF6', '#2DD4BF'][i]} opacity=".8" />
+                <circle cx={`${x * 100}%`} cy="22" r="4" fill={['#2DD4BF', '#F0801E', '#5EEAD4', '#A855F7'][i]} opacity=".8" />
               </g>
             ))}
           </svg>
         </div>
 
+        {/* Solid Architecture Module Cards */}
         <div className="arch-cards" style={{ borderBottom: '1px solid var(--line)' }}>
           <div className="acard" onClick={() => setModalKey('imu')} style={{ position: 'relative' }}>
             <div className="b-dot tr"></div><div className="b-dot br"></div>
             <div className="acard-num">MODULE 01</div>
-            <div className="acard-ic"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></div>
+            <div className="acard-ic"><Layers size={22} color="var(--status-ok)" /></div>
             <h4>Sensor Inputs</h4>
-            <p>Motion and satellite sensors stream continuously into AERIS.</p>
+            <p>100 Hz 6-axis IMU streams continuously into quaternion strapdown integration.</p>
+            <div className="acard-tap">SPECIFICATIONS →</div>
           </div>
+
           <div className="acard" onClick={() => setModalKey('ai')} style={{ position: 'relative' }}>
             <div className="b-dot tr"></div><div className="b-dot br"></div>
             <div className="acard-num">MODULE 02</div>
-            <div className="acard-ic"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
-            <h4>AI Velocity Model</h4>
-            <p>A trained neural network estimates speed and direction from motion alone.</p>
+            <div className="acard-ic"><Cpu size={22} color="var(--orange)" /></div>
+            <h4>AI Kinematics</h4>
+            <p>Recurrent BiGRU models estimate vehicle velocity vectors from motion signatures.</p>
+            <div className="acard-tap">SPECIFICATIONS →</div>
           </div>
+
           <div className="acard" onClick={() => setModalKey('ekf')} style={{ position: 'relative' }}>
             <div className="b-dot tr"></div><div className="b-dot br"></div>
             <div className="acard-num">MODULE 03</div>
-            <div className="acard-ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></div>
-            <h4>Kalman Fusion</h4>
-            <p>All signals are mathematically blended into one best-guess position in real time.</p>
+            <div className="acard-ic"><Shield size={22} color="var(--status-ok-hi)" /></div>
+            <h4>15-State ES-EKF</h4>
+            <p>Quaternion manifold propagation with Joseph-stabilized error covariance updates.</p>
+            <div className="acard-tap">SPECIFICATIONS →</div>
           </div>
-          <div className="acard" onClick={() => setModalKey('out')}>
+
+          <div className="acard" onClick={() => setModalKey('rts')}>
             <div className="acard-num">MODULE 04</div>
-            <div className="acard-ic"><svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg></div>
-            <h4>Continuous Output</h4>
-            <p>A smooth position stream is generated — never frozen, never jumping.</p>
+            <div className="acard-ic"><RefreshCw size={22} color="var(--neon-purple)" /></div>
+            <h4>RTS Smoother</h4>
+            <p>Backward recursion cuts mean error by up to 69.1% for post-mission analysis.</p>
+            <div className="acard-tap">SPECIFICATIONS →</div>
           </div>
         </div>
       </section>
 
-      {/* Modal Overlay */}
-      <div className={`amodal ${modalKey ? 'open' : ''}`} role="dialog" aria-modal="true">
-        <button className="mod-close" onClick={() => setModalKey(null)}>✕</button>
-        {d && (
-          <div id="amodalBody">
-            <div style={{ marginBottom: '22px' }}>
-              <div style={{ fontFamily: 'var(--f-m)', fontSize: '9px', color: d.color, letterSpacing: '.14em', marginBottom: '8px' }}>MODULE DETAIL</div>
-              <h3 style={{ fontFamily: 'var(--f-d)', fontWeight: 700, fontSize: '20px' }}>{d.title}</h3>
-              <span style={{ fontFamily: 'var(--f-m)', fontSize: '8px', color: d.color, letterSpacing: '.1em', border: `1px solid ${d.color}`, padding: '2px 7px', opacity: .7, marginTop: '8px', display: 'inline-block' }}>{d.tag}</span>
+      {/* Solid Technical Drilldown Modal (No Glassmorphism) */}
+      {modalKey && d && (
+        <div className="solid-modal-overlay" onClick={() => setModalKey(null)}>
+          <div className="solid-modal-box" onClick={(e) => e.stopPropagation()}>
+            <div className="solid-modal-head">
+              <div className="solid-modal-tag" style={{ color: d.color }}>{d.tag}</div>
+              <h3 className="solid-modal-title">{d.title}</h3>
+              <button className="solid-modal-close" onClick={() => setModalKey(null)}>
+                <X size={16} />
+              </button>
             </div>
-            <p style={{ fontSize: '13px', color: 'var(--muted)', lineHeight: 1.7, marginBottom: '22px' }}>{d.desc}</p>
-            {d.rows.map(([k, v]: [string, string], i: number) => (
-              <div className="mod-row" key={i}>
-                <span className="mod-k">{k}</span>
-                <span className="mod-v">{v}</span>
-              </div>
-            ))}
+
+            <p className="solid-modal-desc">{d.desc}</p>
+
+            <div className="solid-modal-table">
+              {d.rows.map(([k, v]: [string, string]) => (
+                <div key={k} className="solid-modal-row">
+                  <span className="sm-k">{k}</span>
+                  <span className="sm-v">{v}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="solid-modal-foot">
+              <span className="sm-esc">PRESS [ESC] OR CLICK OUTSIDE TO CLOSE</span>
+              <button className="sm-close-btn" onClick={() => setModalKey(null)}>
+                DISMISS
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </>
   );
 };
