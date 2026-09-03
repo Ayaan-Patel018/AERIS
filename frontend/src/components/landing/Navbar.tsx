@@ -22,10 +22,13 @@ export const Navbar: React.FC = () => {
           <div className="b-dot br"></div>
         </div>
         <div className="nav-links" style={{ position: 'relative' }}>
-          <a href="#problem">Problem</a>
-          <a href="#solution">Solution</a>
-          <a href="#tech">Technology</a>
-          <a href="#about">About</a>
+          <a href="/#problem">Problem</a>
+          <a href="/#solution">Solution</a>
+          <a href="/#tech">Technology</a>
+          <a href="/#about">About</a>
+          <a href="/developers" className="nav-devs-btn">
+            Developers
+          </a>
           <div className="b-dot br"></div>
         </div>
         <div className="nav-cta">

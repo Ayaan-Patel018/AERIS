@@ -1,38 +1,56 @@
 import React from 'react';
+import { Building, RadioOff, Mountain, AlertCircle } from 'lucide-react';
 
 export const ProblemSection: React.FC = () => {
   return (
     <section id="problem" className="container border-b">
       <div className="b-dot bl"></div><div className="b-dot br"></div>
-      <div style={{ padding: '120px 48px' }}>
-        <div className="eyebrow rev in">THE PROBLEM</div>
-        <h2 className="sec-title rev d1 in">What happens when GPS fails?</h2>
+      <div style={{ padding: '96px 48px 48px' }}>
+        <div className="eyebrow rev in">CRITICAL VULNERABILITY</div>
+        <h2 className="sec-title rev d1 in">When Satellite Triangulation Fails</h2>
         <p className="prob-bridge rev d2 in" style={{ marginBottom: 0 }}>
-          Modern navigation relies entirely on clear lines of sight to satellites in space. For autonomous fleets, defense vehicles, and everyday drivers, losing that signal means losing location data instantly. The dot freezes, the route is lost, and safety is compromised.
+          Modern defense, aviation, and autonomous systems depend critically on continuous GNSS signals. When line-of-sight to the satellite constellation is blocked or corrupted, traditional navigation suffers catastrophic position divergence.
         </p>
       </div>
       
       <div className="prob-cards">
         <div className="pcard rev d1 in">
+          <div className="pcard-badge">ATTENUATION: -90 dB</div>
           <div className="pcard-ic">
-            <svg viewBox="0 0 24 24"><path d="M4 22V10a8 8 0 0 1 16 0v12M8 22v-9a4 4 0 0 1 8 0v9"/></svg>
+            <Mountain size={22} color="var(--status-err)" />
           </div>
-          <h4>Tunnels & Underpasses</h4>
-          <p>Solid concrete and earth instantly block all satellite signals. Navigation systems typically freeze at the entrance and jump erratically upon exit.</p>
+          <h4>Tunnels & Subterranean</h4>
+          <p>Overhead reinforced concrete and earth attenuate RF carrier waves below receiver sensitivity. Standard systems freeze at the entrance and violently jump upon exit.</p>
+          <div className="pcard-foot-metric">
+            <span className="pcard-foot-k">CONSEQUENCE</span>
+            <span className="pcard-foot-v">TOTAL FIX LOSS (0 SATS)</span>
+          </div>
         </div>
+
         <div className="pcard rev d2 in">
+          <div className="pcard-badge">DEVIATION: &gt; 450 METERS</div>
           <div className="pcard-ic">
-            <svg viewBox="0 0 24 24"><path d="M4 22V9h4v13M8 22V5h4v17M12 22v-9h4v9M16 22V11h4v11"/></svg>
+            <Building size={22} color="var(--orange)" />
           </div>
-          <h4>Urban Canyons</h4>
-          <p>Tall buildings reflect and distort weak GPS signals, causing "multipath" errors that can throw location estimates off by entire city blocks.</p>
+          <h4>Urban Canyons & Multipath</h4>
+          <p>High-rise glass and steel facades reflect pseudorange signals. Delayed multipath reflections trick receiver correlation algorithms, creating fatal false fixes.</p>
+          <div className="pcard-foot-metric">
+            <span className="pcard-foot-k">CONSEQUENCE</span>
+            <span className="pcard-foot-v">DIVERGENT MULTIPATH DRIFT</span>
+          </div>
         </div>
+
         <div className="pcard rev d3 in">
+          <div className="pcard-badge">INTERFERENCE: 1575.42 MHz</div>
           <div className="pcard-ic">
-            <svg viewBox="0 0 24 24"><path d="M12 2v20M7.5 5.5l9 13M16.5 5.5l-9 13"/></svg>
+            <RadioOff size={22} color="var(--status-err)" />
           </div>
-          <h4>Signal Jamming</h4>
-          <p>Intentional interference is increasingly common in defense and commercial sectors, rendering standard receivers completely blind.</p>
+          <h4>Electronic Warfare & Jamming</h4>
+          <p>Cheap portable RF jammers saturate the L1/L2 frequency band with white noise, completely blinding civilian and defense receivers across entire zones.</p>
+          <div className="pcard-foot-metric">
+            <span className="pcard-foot-k">CONSEQUENCE</span>
+            <span className="pcard-foot-v">RF RECEIVER SATURATION</span>
+          </div>
         </div>
       </div>
     </section>

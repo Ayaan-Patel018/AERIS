@@ -1,5 +1,6 @@
 import React from 'react';
 import { useDashboardContext } from '../../context/DashboardContext';
+import { Play, Pause } from 'lucide-react';
 
 export const PlaybackControls: React.FC = () => {
   const { isPlaying, setIsPlaying } = useDashboardContext();
@@ -8,21 +9,14 @@ export const PlaybackControls: React.FC = () => {
     setIsPlaying(!isPlaying);
   };
 
-
-
   return (
-    <>
-      <button className="play-btn" onClick={togglePlay} aria-label="Play/Pause">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-          {isPlaying 
-            ? <polygon points="6 19 6 5 18 5 18 19" /> 
-            : <polygon points="5 3 19 12 5 21 5 3" />
-          }
-        </svg>
-      </button>
-      {/* Expose speed btn externally so BottomBar can place it correctly if needed, 
-          but we'll just return an array/fragment and let BottomBar structure it, 
-          or better yet, keep them decoupled. */}
-    </>
+    <button 
+      className={`cockpit-play-btn ${isPlaying ? 'playing' : ''}`}
+      onClick={togglePlay} 
+      aria-label={isPlaying ? 'Pause Simulation' : 'Start Simulation'}
+      title={isPlaying ? 'Pause [Space]' : 'Play [Space]'}
+    >
+      {isPlaying ? <Pause size={14} /> : <Play size={14} className="play-triangle" />}
+    </button>
   );
 };

@@ -6,6 +6,7 @@ import { useGNSSStatus } from '../../hooks/useGNSSStatus';
 import { drawTrajectory } from './TrajectoryLayer';
 import { drawVehicleMarker } from './VehicleMarker';
 import { drawUncertaintyCircle } from './UncertaintyCircle';
+import { LocateFixed, Maximize2, Plus, Minus, Compass } from 'lucide-react';
 
 type TileStyle = 'dark' | 'streets' | 'satellite';
 
@@ -251,8 +252,8 @@ export const MapArea: React.FC = () => {
       drawUncertaintyCircle(ctx, curPt.x, curPt.y, fusedRadiusPx, 'rgba(240, 128, 30, 0.15)');
     }
 
-    // Draw Vehicle Marker
-    drawVehicleMarker(ctx, curPt.x, curPt.y, heading, vehicleColor);
+    // Draw Vehicle Marker with active beacon pulse during outage
+    drawVehicleMarker(ctx, curPt.x, curPt.y, heading, vehicleColor, isOutage);
   }, [gt, gnss, fused, smoothed, currentIndex, currentGnssPos, currentFusedPos, currentSmoothedPos, layers, isOutage, aerisError, gnssError]);
 
   // ── Sync canvas whenever map moves, zooms, or renders ───────────────────
@@ -346,7 +347,19 @@ export const MapArea: React.FC = () => {
         style={{ width: '100%', height: '100%', display: 'block' }}
       />
 
-      {/* Floating HUD Controls */}
+      {/* Top-Right Technical Orientation Compass Rose */}
+      <div className="map-compass-hud">
+        <div className="compass-reticle">
+          <div className="compass-needle-n"></div>
+          <span className="compass-n-label">N</span>
+        </div>
+        <div className="compass-meta">
+          <span className="compass-datum">WGS-84</span>
+          <span className="compass-grid">ENU 10Hz</span>
+        </div>
+      </div>
+
+      {/* Floating Solid HUD Controls */}
       <div className="map-hud-controls">
         <div className="map-hud-group">
           <button
@@ -354,7 +367,7 @@ export const MapArea: React.FC = () => {
             onClick={handleToggleAutoFollow}
             title={autoFollow ? 'Auto-follow active' : 'Click to follow vehicle'}
           >
-            <span className="hud-dot" />
+            <LocateFixed size={13} className="hud-ic" />
             <span>FOLLOW</span>
           </button>
           <button
@@ -362,6 +375,7 @@ export const MapArea: React.FC = () => {
             onClick={handleFitRoute}
             title="Fit entire trajectory to screen"
           >
+            <Maximize2 size={12} className="hud-ic" />
             <span>FIT ROUTE</span>
           </button>
         </div>
@@ -393,14 +407,14 @@ export const MapArea: React.FC = () => {
             onClick={handleZoomIn}
             title="Zoom In"
           >
-            +
+            <Plus size={13} />
           </button>
           <button
             className="map-hud-btn map-hud-icon-btn"
             onClick={handleZoomOut}
             title="Zoom Out"
           >
-            -
+            <Minus size={13} />
           </button>
         </div>
       </div>

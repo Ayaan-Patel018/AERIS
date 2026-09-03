@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { LandingPage } from './pages/LandingPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { DevelopersPage } from './pages/DevelopersPage';
 
 const ScrollToTop = () => {
   const { pathname } = useLocation();
@@ -22,6 +23,7 @@ export const App: React.FC = () => {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/portal" element={<DashboardPage />} />
+        <Route path="/developers" element={<DevelopersPage />} />
       </Routes>
     </BrowserRouter>
   );
