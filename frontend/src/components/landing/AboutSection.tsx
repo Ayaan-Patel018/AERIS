@@ -14,22 +14,24 @@ export const AboutSection: React.FC = () => {
   };
 
   const members = [
-    { name: "Anurag Mishra", role: "Team Lead / Navigation Algorithms" },
-    { name: "Ayaan Patel", role: "AI/ML Kinematics & RTS Smoother" },
-    { name: "Aryan Badoriya", role: "Systems Integration & Frontend" },
-    { name: "Ananya Sharma", role: "Data Engineering & GNSS Pipelines" },
-    { name: "Shreya Zutshi", role: "Validation & Statistical Testing" },
-    { name: "Ananya Tiwari", role: "QA & Embedded Modeling" }
+    { name: "Anurag Mishra", role: "Full-Stack Engineer / Backend & Frontend Integration" },
+    { name: "Ayaan Patel", role: "Backend Engineer / Core Logic & API Architecture" },
+    { name: "Aryan Badoriya", role: "Frontend Engineer / UI Development & Systems Integration" },
+    { name: "Ananya Sharma", role: "Research Lead / Technical Writing & UI Logic Support" },
+    { name: "Shreya Zutshi", role: "Presentation & Documentation Lead" },
+    { name: "Ananya Tiwari", role: "UX Research & Content Associate" }
   ];
 
   return (
     <section id="about" className="container about-sec grid-5" style={{ position: 'relative' }}>
       <div className="b-dot tl"></div><div className="b-dot tr"></div>
+      <div className="b-dot bl"></div><div className="b-dot br"></div>
       
       <div className="ab-left" style={{ position: 'relative' }}>
-        <div className="b-dot tr"></div><div className="b-dot br"></div>
+        <div className="b-dot tl"></div><div className="b-dot tr"></div>
+        <div className="b-dot bl"></div><div className="b-dot br"></div>
         <div className="eyebrow rev in">ORGANIZATIONAL CONTEXT</div>
-        <h2 className="sec-title rev d1 in" style={{ fontSize: '28px' }}>SIH 26168 // ISRO DOS</h2>
+        <h2 className="sec-title rev d1 in" style={{ fontSize: '28px' }}>SIH 26168 • ISRO DOS</h2>
         <p className="prob-bridge rev d2 in" style={{ fontSize: '14px', marginBottom: '24px' }}>
           AERIS (Intelligent Dead Reckoning Navigation System) is engineered for Smart India Hackathon problem statement 26168, under the aegis of the Indian Space Research Organisation (ISRO) and Department of Space. The mission demonstrates production-grade sensor fusion and deep kinematic estimation to guarantee vehicle localization when satellite coverage is unavailable.
         </p>
@@ -39,7 +41,9 @@ export const AboutSection: React.FC = () => {
         </div>
       </div>
 
-      <div className="ab-right">
+      <div className="ab-right" style={{ position: 'relative' }}>
+        <div className="b-dot tl"></div><div className="b-dot tr"></div>
+        <div className="b-dot bl"></div><div className="b-dot br"></div>
         <div className="ab-right-head">
           <div className="eyebrow rev in" style={{ marginBottom: 0 }}>ENGINEERING CADRE</div>
           <button className="ab-view-devs-btn" onClick={handleDevs}>

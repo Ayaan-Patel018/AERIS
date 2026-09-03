@@ -14,7 +14,7 @@ export const DemoPreview: React.FC = () => {
           <div className="bezel-top-bar">
             <div className="bezel-badge">
               <Radio size={12} color="var(--status-ok)" />
-              <span>LIVE COCKPIT PREVIEW // REAL DATA</span>
+              <span>LIVE COCKPIT PREVIEW • REAL DATA</span>
             </div>
             <div className="bezel-status">6,812 TIMESTEPS</div>
           </div>

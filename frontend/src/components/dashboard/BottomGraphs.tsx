@@ -72,8 +72,9 @@ export const BottomGraphs: React.FC = () => {
 
   return (
     <div className="bottom-graphs-container">
-      {/* ── GRAPH 1: POSITION ERROR ──────────────────────────── */}
-      <div className="graph-card">
+      <div style={{ gridColumn: '2 / 6', display: 'flex' }}>
+        {/* ── GRAPH 1: POSITION ERROR ──────────────────────────── */}
+        <div className="graph-card">
         <div className="graph-meta-header">
           <div className="graph-title-wrap">
             <span className="graph-title">POSITION ERROR</span>
@@ -115,8 +116,8 @@ export const BottomGraphs: React.FC = () => {
         </svg>
       </div>
 
-      {/* ── GRAPH 2: VELOCITY ────────────────────────────────── */}
-      <div className="graph-card">
+        {/* ── GRAPH 2: VELOCITY ────────────────────────────────── */}
+        <div className="graph-card">
         <div className="graph-meta-header">
           <div className="graph-title-wrap">
             <span className="graph-title">VELOCITY</span>
@@ -146,8 +147,8 @@ export const BottomGraphs: React.FC = () => {
         </svg>
       </div>
 
-      {/* ── GRAPH 3: FILTER CONFIDENCE ───────────────────────── */}
-      <div className="graph-card">
+        {/* ── GRAPH 3: FILTER CONFIDENCE ───────────────────────── */}
+        <div className="graph-card">
         <div className="graph-meta-header">
           <div className="graph-title-wrap">
             <span className="graph-title">FILTER CONFIDENCE</span>
@@ -173,6 +174,7 @@ export const BottomGraphs: React.FC = () => {
 
           <line x1={playheadX} y1="0" x2={playheadX} y2="75" stroke="#FFFFFF" strokeWidth="1" strokeDasharray="2,2" opacity="0.7" />
         </svg>
+        </div>
       </div>
     </div>
   );

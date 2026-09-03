@@ -18,46 +18,38 @@ export const SolutionSection: React.FC = () => {
         
         {/* Step 01 */}
         <div className="step rev d1 in" style={{ position: 'relative' }}>
-          <div className="b-dot tr"></div><div className="b-dot br"></div>
-          <div className="step-badge-row">
-            <span className="step-num">STEP 01</span>
-            <span className="step-tag-pill ok">AUTONOMOUS AUDIT</span>
-          </div>
-          <div className="step-ic-box">
+          <div className="b-dot tl"></div><div className="b-dot tr"></div>
+          <div className="b-dot bl"></div><div className="b-dot br"></div>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Eye size={20} color="var(--status-ok)" />
-          </div>
-          <h3>Receiver Outage Detection</h3>
+            Receiver Outage Detection
+          </h3>
           <p>A statistical Innovation Monitor audits incoming satellite covariance and carrier-to-noise metrics. The exact millisecond of signal degradation triggers the outage flag instantly.</p>
-          <div className="step-meta-foot">LATENCY &lt; 10ms // ZERO EXTERNAL OVERHEAD</div>
+          <div className="step-meta-foot">LATENCY &lt; 10ms • ZERO EXTERNAL OVERHEAD</div>
         </div>
 
         {/* Step 02 */}
         <div className="step rev d2 in" style={{ position: 'relative' }}>
-          <div className="b-dot tr"></div><div className="b-dot br"></div>
-          <div className="step-badge-row">
-            <span className="step-num">STEP 02</span>
-            <span className="step-tag-pill warn">STRAPDOWN SWITCH</span>
-          </div>
-          <div className="step-ic-box">
+          <div className="b-dot tl"></div><div className="b-dot tr"></div>
+          <div className="b-dot bl"></div><div className="b-dot br"></div>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Zap size={20} color="var(--orange)" />
-          </div>
-          <h3>100 Hz Strapdown Propagation</h3>
+            100 Hz Strapdown Propagation
+          </h3>
           <p>Inertial sensors (3-axis accelerometer, 3-axis rate gyroscope) take complete control of nominal attitude and velocity propagation using quaternion kinematics.</p>
-          <div className="step-meta-foot">100 Hz SAMPLING // UNJAMMABLE PHYSICS</div>
+          <div className="step-meta-foot">100 Hz SAMPLING • UNJAMMABLE PHYSICS</div>
         </div>
 
         {/* Step 03 */}
-        <div className="step rev d3 in">
-          <div className="step-badge-row">
-            <span className="step-num">STEP 03</span>
-            <span className="step-tag-pill ok">FUSION CORRECTION</span>
-          </div>
-          <div className="step-ic-box">
+        <div className="step rev d3 in" style={{ position: 'relative' }}>
+          <div className="b-dot tl"></div><div className="b-dot tr"></div>
+          <div className="b-dot bl"></div><div className="b-dot br"></div>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Shield size={20} color="var(--status-ok)" />
-          </div>
-          <h3>15-State Error-State EKF</h3>
+            15-State Error-State EKF
+          </h3>
           <p>The Kalman filter blends kinematic velocity predictions and zero-velocity constraints to continuously arrest sensor bias drift, holding sub-meter accuracy until satellites return.</p>
-          <div className="step-meta-foot">JOSEPH-FORM COVARIANCE // ZERO POS JUMP</div>
+          <div className="step-meta-foot">JOSEPH-FORM COVARIANCE • ZERO POS JUMP</div>
         </div>
       </div>
     </section>
