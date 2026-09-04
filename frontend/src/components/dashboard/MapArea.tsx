@@ -82,10 +82,6 @@ export const MapArea: React.FC = () => {
       subdomains: config.subdomains ?? ['a', 'b', 'c'],
     }).addTo(map);
 
-    map.on('dragstart', () => {
-      setAutoFollow(false);
-    });
-
     mapRef.current = map;
 
     return () => {
@@ -143,11 +139,6 @@ export const MapArea: React.FC = () => {
       prevPos: TrajectoryPoint | undefined,
       refStorage: { current: number }
     ): number => {
-      if (pos?.heading !== undefined && !isNaN(pos.heading)) {
-        const rad = ((pos.heading - 90) * Math.PI) / 180;
-        refStorage.current = rad;
-        return rad;
-      }
       if (
         pos?.lat !== undefined &&
         pos?.lon !== undefined &&
@@ -329,7 +320,7 @@ export const MapArea: React.FC = () => {
       else if (layers.gnss) pos = currentGnssPos;
 
       if (pos && pos.lat !== undefined && pos.lon !== undefined) {
-        map.panTo([pos.lat, pos.lon], { animate: false });
+        map.panInside([pos.lat, pos.lon], { padding: [100, 100], animate: false });
       }
     }
     renderCanvas();

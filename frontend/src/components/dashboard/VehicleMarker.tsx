@@ -42,34 +42,34 @@ export const drawVehicleMarker = (
   // 4. Forward Velocity Vector Line (tactical projection)
   ctx.beginPath();
   ctx.moveTo(0, 0);
-  ctx.lineTo(28, 0);
+  ctx.lineTo(17, 0);
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1.8;
+  ctx.lineWidth = 1.5;
   ctx.stroke();
 
   // 5. Tactical Chevron Arrow
   ctx.beginPath();
-  ctx.moveTo(17, 0);      // Arrow tip
-  ctx.lineTo(-11, 9.5);   // Right wing
-  ctx.lineTo(-4.5, 0);    // Inner notch
-  ctx.lineTo(-11, -9.5);  // Left wing
+  ctx.moveTo(10, 0);      // Arrow tip
+  ctx.lineTo(-7, 6);      // Right wing
+  ctx.lineTo(-3, 0);      // Inner notch
+  ctx.lineTo(-7, -6);     // Left wing
   ctx.closePath();
 
   // Contrast Border (Solid black border makes it 100% visible on any background)
   ctx.strokeStyle = '#050508';
-  ctx.lineWidth = 3.2;
+  ctx.lineWidth = 2.0;
   ctx.lineJoin = 'round';
   ctx.stroke();
 
   // Vibrant Fill with glow
   ctx.fillStyle = color;
-  ctx.shadowBlur = 12;
+  ctx.shadowBlur = 8;
   ctx.shadowColor = color;
   ctx.fill();
 
   // 6. Center Cockpit Core Dot
   ctx.beginPath();
-  ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+  ctx.arc(0, 0, 1.5, 0, Math.PI * 2);
   ctx.fillStyle = '#FFFFFF';
   ctx.shadowBlur = 0;
   ctx.fill();

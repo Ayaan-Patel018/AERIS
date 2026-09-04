@@ -51,16 +51,7 @@ export const BottomGraphs: React.FC = () => {
 
   const pathFusedVel = pts2path(velPts, maxVel);
 
-  // ── 3. Confidence Trend Data ───────────────────────────────────
-  const confPts = fused.map((p, i) => {
-    const t = i / N;
-    if (t >= OS && t <= OE) {
-      const progressInOutage = (t - OS) / (OE - OS);
-      return Math.max(50, 95 - progressInOutage * 45);
-    }
-    return 95;
-  });
-  const pathConf = pts2path(confPts, 100);
+
 
   const playheadX = (progress * 300).toFixed(1);
 
@@ -68,11 +59,10 @@ export const BottomGraphs: React.FC = () => {
   const curGnssErrStr = `${gnssError.toFixed(2)} m`;
   const curFusedErrStr = `${aerisError.toFixed(2)} m`;
   const curVelStr = `${currentVelocity.toFixed(1)} km/h`;
-  const curConfStr = `${confidence.toFixed(0)}%`;
 
   return (
     <div className="bottom-graphs-container">
-      <div style={{ gridColumn: '2 / 6', display: 'flex' }}>
+      <div style={{ gridColumn: '2 / 3', display: 'flex' }}>
         {/* ── GRAPH 1: POSITION ERROR ──────────────────────────── */}
         <div className="graph-card">
         <div className="graph-meta-header">
@@ -122,8 +112,8 @@ export const BottomGraphs: React.FC = () => {
           <div className="graph-title-wrap">
             <span className="graph-title">VELOCITY</span>
             <span className="graph-legend">
-              <span className="leg-dot cyan"></span> GNSS (1 Hz)
-              <span className="leg-dot orange"></span> EKF (100 Hz)
+              <span className="leg-dot cyan"></span> GNSS (10 Hz)
+              <span className="leg-dot orange"></span> EKF (10 Hz)
             </span>
           </div>
           <div className="graph-current-stats">
@@ -147,34 +137,7 @@ export const BottomGraphs: React.FC = () => {
         </svg>
       </div>
 
-        {/* ── GRAPH 3: FILTER CONFIDENCE ───────────────────────── */}
-        <div className="graph-card">
-        <div className="graph-meta-header">
-          <div className="graph-title-wrap">
-            <span className="graph-title">FILTER CONFIDENCE</span>
-            <span className="graph-legend">
-              <span className="leg-dot green"></span> ES-EKF HEALTH
-            </span>
-          </div>
-          <div className="graph-current-stats">
-            <span className="stat-item green">CONFIDENCE: <strong>{curConfStr}</strong></span>
-          </div>
-        </div>
 
-        <svg className="graph-svg" viewBox="0 0 300 75" preserveAspectRatio="none">
-          <rect x="0" y="0" width="300" height="75" fill="#0E0E12" />
-          <rect x={OS * 300} width={(OE - OS) * 300} height="75" fill="url(#outageShade)" />
-          <line x1={OS * 300} y1="0" x2={OS * 300} y2="75" stroke="#E5484D" strokeWidth="0.8" strokeDasharray="2,2" opacity="0.6" />
-          <line x1={OE * 300} y1="0" x2={OE * 300} y2="75" stroke="#E5484D" strokeWidth="0.8" strokeDasharray="2,2" opacity="0.6" />
-
-          <line x1="0" y1="35" x2="300" y2="35" stroke="#1A1A22" strokeWidth="0.5" />
-          <line x1="0" y1="65" x2="300" y2="65" stroke="#1A1A22" strokeWidth="0.5" />
-
-          <polyline points={pathConf} fill="none" stroke="#2DD4BF" strokeWidth="1.6" />
-
-          <line x1={playheadX} y1="0" x2={playheadX} y2="75" stroke="#FFFFFF" strokeWidth="1" strokeDasharray="2,2" opacity="0.7" />
-        </svg>
-        </div>
       </div>
     </div>
   );

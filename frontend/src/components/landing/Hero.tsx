@@ -79,9 +79,8 @@ export const Hero: React.FC = () => {
               <div className="terminal-header">
                 <div className="terminal-title">
                   <Terminal size={12} color="var(--status-ok)" />
-                  <span>ONBOARD SENSOR BUS • TELEMETRY STREAM</span>
+                  <span>ONBOARD SENSOR BUS • TELEMETRY STREAM • 10 HZ</span>
                 </div>
-                <div className="terminal-freq">100 HZ</div>
               </div>
 
               <div className="terminal-grid">
