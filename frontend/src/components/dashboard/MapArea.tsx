@@ -139,6 +139,7 @@ export const MapArea: React.FC = () => {
       prevPos: TrajectoryPoint | undefined,
       refStorage: { current: number }
     ): number => {
+      // Fallback: use exact heading from backend if available
       if (pos?.heading !== undefined && !isNaN(pos.heading)) {
         const rad = ((pos.heading - 90) * Math.PI) / 180;
         refStorage.current = rad;
