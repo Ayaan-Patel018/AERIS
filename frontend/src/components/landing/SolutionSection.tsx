@@ -34,10 +34,10 @@ export const SolutionSection: React.FC = () => {
           <div className="b-dot bl"></div><div className="b-dot br"></div>
           <h3 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Zap size={20} color="var(--orange)" />
-            100 Hz Strapdown Propagation
+            1 Hz Strapdown Propagation
           </h3>
           <p>Inertial sensors (3-axis accelerometer, 3-axis rate gyroscope) take complete control of nominal attitude and velocity propagation using quaternion kinematics.</p>
-          <div className="step-meta-foot">100 Hz SAMPLING • UNJAMMABLE PHYSICS</div>
+          <div className="step-meta-foot">1 Hz SAMPLING • UNJAMMABLE PHYSICS</div>
         </div>
 
         {/* Step 03 */}

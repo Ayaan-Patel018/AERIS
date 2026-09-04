@@ -3,10 +3,10 @@ import { Cpu, Shield, Layers, RefreshCw, X, ArrowRight, ExternalLink } from 'luc
 
 const MD: Record<string, any> = {
   imu: {
-    title: 'Sensor Inputs & Strapdown IMU', color: '#2DD4BF', tag: 'INPUT • 100 Hz',
+    title: 'Sensor Inputs & Strapdown IMU', color: '#2DD4BF', tag: 'INPUT • 1 Hz',
     desc: 'Raw inertial measurements (3-axis accelerometer, 3-axis rate gyroscope) are the unjammable backbone of dead reckoning, augmented by GNSS when satellites are visible.',
     rows: [
-      ['Sampling Rate', '100 Hz IMU / 1 Hz GNSS'],
+      ['Sampling Rate', '1 Hz IMU / 10 Hz GNSS'],
       ['Attitude Representation', 'Unit Quaternion (Hamilton)'],
       ['Noise Handling', 'Online bias estimation in EKF state'],
       ['Coordinate Frame', 'WGS-84 to Local ENU (East-North-Up)']
@@ -96,7 +96,7 @@ export const HowItWorks: React.FC = () => {
             <div className="acard-num">MODULE 01</div>
             <div className="acard-ic"><Layers size={22} color="var(--status-ok)" /></div>
             <h4>Sensor Inputs</h4>
-            <p>100 Hz 6-axis IMU streams continuously into quaternion strapdown integration.</p>
+            <p>1 Hz 6-axis IMU streams continuously into quaternion strapdown integration.</p>
             <div className="acard-tap">SPECIFICATIONS →</div>
           </div>
 

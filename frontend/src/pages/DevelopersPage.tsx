@@ -24,7 +24,7 @@ const DEVELOPERS: Developer[] = [
     avatar: "https://github.com/ananyascodes.png",
     github: "https://github.com/ananyascodes",
     linkedin: "https://www.linkedin.com/in/ananya-sharma-dev/",
-    description: "Contributed to IO-VNBD dataset literature review, problem statement research, and supporting documentation for the presentation. Spearheaded the team's direction and execution.",
+    description: "As Team Leader, guided the project's overall direction and coordinated work across the backend and frontend tracks. Contributed to the IO-VNBD dataset literature review, problem statement research, and supporting documentation for the SIH presentation.",
     tags: ["Team Leader", "IO-VNBD Research", "Documentation", "Problem Statement Analysis"],
     metrics: { label: "Contribution", value: "Research & Literature Review" },
     isLeader: true
@@ -68,7 +68,7 @@ const DEVELOPERS: Developer[] = [
     avatar: "https://github.com/shreyazutshi.png",
     github: "https://github.com/shreyazutshi",
     linkedin: "https://www.linkedin.com/in/shreya-zutshi/",
-    description: "Coordinated the SIH pitch narrative, slide design, and demo rehearsal logistics.",
+    description: "Coordinated the SIH pitch narrative, slide structure, and demo rehearsal logistics — shaping how the team's technical work was communicated to judges and ensuring the live demonstration ran smoothly under time constraints.",
     tags: ["Pitch Narrative", "Slide Design", "Demo Coordination"],
     metrics: { label: "Contribution", value: "SIH Pitch & Demo" }
   },
@@ -79,7 +79,7 @@ const DEVELOPERS: Developer[] = [
     avatar: "https://github.com/Ananya3107.png",
     github: "https://github.com/Ananya3107",
     linkedin: "https://www.linkedin.com/in/ananya-tiwari-devs/",
-    description: "Performed manual testing and UI/UX feedback throughout development, reporting issues and usability concerns to the engineering team.",
+    description: "Performed manual testing and UI/UX feedback throughout development, working through the dashboard's interactive flows to catch usability issues and reporting them back to the engineering team for resolution.",
     tags: ["Manual Testing", "UI/UX Feedback", "Bug Reporting"],
     metrics: { label: "Contribution", value: "QA & Usability Testing" }
   }
