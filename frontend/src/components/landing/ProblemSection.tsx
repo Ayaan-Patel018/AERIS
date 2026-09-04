@@ -14,12 +14,14 @@ export const ProblemSection: React.FC = () => {
       </div>
       
       <div className="prob-cards">
-        <div className="pcard rev d1 in">
+        <div className="pcard rev d1 in" style={{ position: 'relative' }}>
+          <div className="b-dot tl"></div><div className="b-dot tr"></div>
+          <div className="b-dot bl"></div><div className="b-dot br"></div>
           <div className="pcard-badge">ATTENUATION: -90 dB</div>
-          <div className="pcard-ic">
+          <h4 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Mountain size={22} color="var(--status-err)" />
-          </div>
-          <h4>Tunnels & Subterranean</h4>
+            Tunnels & Subterranean
+          </h4>
           <p>Overhead reinforced concrete and earth attenuate RF carrier waves below receiver sensitivity. Standard systems freeze at the entrance and violently jump upon exit.</p>
           <div className="pcard-foot-metric">
             <span className="pcard-foot-k">CONSEQUENCE</span>
@@ -27,12 +29,14 @@ export const ProblemSection: React.FC = () => {
           </div>
         </div>
 
-        <div className="pcard rev d2 in">
+        <div className="pcard rev d2 in" style={{ position: 'relative' }}>
+          <div className="b-dot tl"></div><div className="b-dot tr"></div>
+          <div className="b-dot bl"></div><div className="b-dot br"></div>
           <div className="pcard-badge">DEVIATION: &gt; 450 METERS</div>
-          <div className="pcard-ic">
+          <h4 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Building size={22} color="var(--orange)" />
-          </div>
-          <h4>Urban Canyons & Multipath</h4>
+            Urban Canyons & Multipath
+          </h4>
           <p>High-rise glass and steel facades reflect pseudorange signals. Delayed multipath reflections trick receiver correlation algorithms, creating fatal false fixes.</p>
           <div className="pcard-foot-metric">
             <span className="pcard-foot-k">CONSEQUENCE</span>
@@ -40,12 +44,14 @@ export const ProblemSection: React.FC = () => {
           </div>
         </div>
 
-        <div className="pcard rev d3 in">
+        <div className="pcard rev d3 in" style={{ position: 'relative' }}>
+          <div className="b-dot tl"></div><div className="b-dot tr"></div>
+          <div className="b-dot bl"></div><div className="b-dot br"></div>
           <div className="pcard-badge">INTERFERENCE: 1575.42 MHz</div>
-          <div className="pcard-ic">
+          <h4 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <RadioOff size={22} color="var(--status-err)" />
-          </div>
-          <h4>Electronic Warfare & Jamming</h4>
+            Electronic Warfare & Jamming
+          </h4>
           <p>Cheap portable RF jammers saturate the L1/L2 frequency band with white noise, completely blinding civilian and defense receivers across entire zones.</p>
           <div className="pcard-foot-metric">
             <span className="pcard-foot-k">CONSEQUENCE</span>

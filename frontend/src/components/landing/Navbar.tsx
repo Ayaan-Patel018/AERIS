@@ -57,10 +57,6 @@ export const Navbar: React.FC = () => {
 
         {/* Right CTA */}
         <div className="navbar-right">
-          <div className="navbar-system-status">
-            <span className="navbar-status-dot" />
-            <span className="navbar-status-text">15-STATE ES-EKF</span>
-          </div>
           <Link to="/portal" className="navbar-cta-btn">
             <span>LAUNCH COCKPIT</span>
             <Navigation size={13} />

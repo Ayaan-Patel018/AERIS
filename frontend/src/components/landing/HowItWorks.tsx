@@ -3,7 +3,7 @@ import { Cpu, Shield, Layers, RefreshCw, X, ArrowRight, ExternalLink } from 'luc
 
 const MD: Record<string, any> = {
   imu: {
-    title: 'Sensor Inputs & Strapdown IMU', color: '#2DD4BF', tag: 'INPUT // 100 Hz',
+    title: 'Sensor Inputs & Strapdown IMU', color: '#2DD4BF', tag: 'INPUT • 100 Hz',
     desc: 'Raw inertial measurements (3-axis accelerometer, 3-axis rate gyroscope) are the unjammable backbone of dead reckoning, augmented by GNSS when satellites are visible.',
     rows: [
       ['Sampling Rate', '100 Hz IMU / 1 Hz GNSS'],
@@ -13,7 +13,7 @@ const MD: Record<string, any> = {
     ]
   },
   ai: {
-    title: 'AI Kinematic Velocity Model', color: '#F0801E', tag: 'AI/ML // INFERENCE',
+    title: 'AI Kinematic Velocity Model', color: '#F0801E', tag: 'AI/ML • INFERENCE',
     desc: 'Learns non-linear vehicle motion patterns from high-rate inertial signals to predict forward and lateral velocity when wheel odometry is unavailable.',
     rows: [
       ['Model Architecture', '1D CNN Feature Extractor → BiGRU'],
@@ -23,7 +23,7 @@ const MD: Record<string, any> = {
     ]
   },
   ekf: {
-    title: '15-State Error-State Kalman Filter', color: '#5EEAD4', tag: 'FUSION // 15-STATE',
+    title: '15-State Error-State Kalman Filter', color: '#5EEAD4', tag: 'FUSION • 15-STATE',
     desc: 'The primary estimation core. Propagates nominal state on manifold using quaternion kinematics, while updating the 15-dimensional error state via Joseph-form covariance updates.',
     rows: [
       ['State Vector', 'δp (3), δv (3), δθ (3), δba (3), δbg (3)'],
@@ -33,7 +33,7 @@ const MD: Record<string, any> = {
     ]
   },
   rts: {
-    title: 'Rauch-Tung-Striebel Offline Smoother', color: '#A855F7', tag: 'ANALYSIS // RTS POST-PASS',
+    title: 'Rauch-Tung-Striebel Offline Smoother', color: '#A855F7', tag: 'ANALYSIS • RTS POST-PASS',
     desc: 'Backward post-processing pass over forward filter estimates. Combines full mission history to produce the mathematically optimal trajectory for retrospective analysis.',
     rows: [
       ['Algorithm', 'Rauch-Tung-Striebel (RTS) Backward Smoother'],

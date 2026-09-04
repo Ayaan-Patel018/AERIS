@@ -22,6 +22,8 @@ interface DashboardContextType {
   setLayers: React.Dispatch<React.SetStateAction<Layers>>;
   toggleLayer: (key: keyof Layers) => void;
   resetSimulation: () => void;
+  showCharts: boolean;
+  setShowCharts: (val: boolean) => void;
 }
 
 const DashboardContext = createContext<DashboardContextType | undefined>(undefined);
@@ -33,6 +35,7 @@ export const DashboardProvider: React.FC<{ children: ReactNode }> = ({ children 
   const [simulateOutage, setSimulateOutageRaw] = useState(false);
   const [manualOutageStart, setManualOutageStart] = useState<number | null>(null);
   const [layers, setLayers] = useState<Layers>({ gt: true, gnss: true, fused: true, smoothed: false });
+  const [showCharts, setShowCharts] = useState(true);
 
   const toggleLayer = (key: keyof Layers) => {
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -59,7 +62,8 @@ export const DashboardProvider: React.FC<{ children: ReactNode }> = ({ children 
       manualOutageStart,
       layers, setLayers,
       toggleLayer,
-      resetSimulation
+      resetSimulation,
+      showCharts, setShowCharts
     }}>
       {children}
     </DashboardContext.Provider>

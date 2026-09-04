@@ -336,14 +336,18 @@ export const MapArea: React.FC = () => {
   }, [currentIndex, autoFollow, currentFusedPos, currentGnssPos, currentSmoothedPos, layers, renderCanvas]);
 
   useEffect(() => {
-    const handleResize = () => {
+    const container = mapContainerRef.current;
+    if (!container) return;
+
+    const observer = new ResizeObserver(() => {
       if (mapRef.current) {
         mapRef.current.invalidateSize();
         renderCanvas();
       }
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    });
+
+    observer.observe(container);
+    return () => observer.disconnect();
   }, [renderCanvas]);
 
   const handleFitRoute = () => {

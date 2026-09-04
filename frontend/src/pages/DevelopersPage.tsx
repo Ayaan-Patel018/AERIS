@@ -18,7 +18,7 @@ interface Developer {
 const DEVELOPERS: Developer[] = [
   {
     name: "Ananya Sharma",
-    role: "Developer // Data Engineering",
+    role: "Research Lead / Technical Writing & UI Logic Support",
     focus: "Data Ingestion & GNSS Outage Simulation",
     avatar: "https://github.com/ananyascodes.png",
     github: "https://github.com/ananyascodes",
@@ -29,7 +29,7 @@ const DEVELOPERS: Developer[] = [
   },
   {
     name: "Shreya Zutshi",
-    role: "Developer // Validation Engineering",
+    role: "Presentation & Documentation Lead",
     focus: "Automated Testing & Covariance Stability",
     avatar: "https://github.com/shreyazutshi.png",
     github: "https://github.com/shreyazutshi",
@@ -40,7 +40,7 @@ const DEVELOPERS: Developer[] = [
   },
   {
     name: "Aryan Bhadoriya",
-    role: "Developer // Systems Integration",
+    role: "Frontend Engineer / UI Development & Systems Integration",
     focus: "Frontend Cockpit & Leaflet Canvas Sync",
     avatar: "https://github.com/Codewiz-cpp.png",
     github: "https://github.com/Codewiz-cpp",
@@ -51,7 +51,7 @@ const DEVELOPERS: Developer[] = [
   },
   {
     name: "Anurag Mishra",
-    role: "Developer // Navigation Algorithms",
+    role: "Full-Stack Engineer / Backend & Frontend Integration",
     focus: "15-State Error-State EKF & Covariance Mechanics",
     avatar: "https://github.com/anuragmishra5159.png",
     github: "https://github.com/anuragmishra5159",
@@ -62,7 +62,7 @@ const DEVELOPERS: Developer[] = [
   },
   {
     name: "Ayaan Patel",
-    role: "Developer // AI/ML Kinematics",
+    role: "Backend Engineer / Core Logic & API Architecture",
     focus: "Offline RTS Smoothing & ZARU Drift Arrest",
     avatar: "https://github.com/Ayaan-Patel018.png",
     github: "https://github.com/Ayaan-Patel018",
@@ -72,7 +72,7 @@ const DEVELOPERS: Developer[] = [
   },
   {
     name: "Ananya Tiwari",
-    role: "Developer // Quality Assurance",
+    role: "UX Research & Content Associate",
     focus: "Edge Optimization & Execution Profiling",
     avatar: "https://github.com/Ananya3107.png",
     github: "https://github.com/Ananya3107",
@@ -165,7 +165,7 @@ export const DevelopersPage: React.FC = () => {
         <section className="devs-hero-block">
           <div className="devs-eyebrow">
             <Code2 size={14} />
-            <span>SIH 26168 // ISRO DOS DOMAIN</span>
+            <span>SIH 26168</span>
           </div>
 
           <h1 className="devs-title">Project Developers</h1>
@@ -198,6 +198,10 @@ export const DevelopersPage: React.FC = () => {
         <section className="devs-grid">
           {DEVELOPERS.map((dev) => (
             <div key={dev.name} className="dev-card">
+              <div className="b-dot tl"></div>
+              <div className="b-dot tr"></div>
+              <div className="b-dot bl"></div>
+              <div className="b-dot br"></div>
               {/* Card Header: Avatar + Identity */}
               <div className="dev-card-head">
                 <div className="dev-avatar-wrap">

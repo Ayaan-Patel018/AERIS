@@ -2,10 +2,10 @@ import React, { useEffect } from 'react';
 import { PlaybackControls } from './PlaybackControls';
 import { TimelineSlider } from './TimelineSlider';
 import { useDashboardContext } from '../../context/DashboardContext';
-import { Zap } from 'lucide-react';
+import { BarChart2 } from 'lucide-react';
 
 export const BottomBar: React.FC = () => {
-  const { speed, setSpeed, isPlaying, setIsPlaying, setProgress, simulateOutage, setSimulateOutage } = useDashboardContext();
+  const { speed, setSpeed, isPlaying, setIsPlaying, setProgress, simulateOutage, setSimulateOutage, showCharts, setShowCharts } = useDashboardContext();
 
   const speeds = [0.5, 1, 2, 4];
 
@@ -52,14 +52,14 @@ export const BottomBar: React.FC = () => {
         ))}
       </div>
 
-      {/* Outage Simulation Switch */}
+      {/* Charts Toggle */}
       <button 
-        className={`outage-toggle-btn ${simulateOutage ? 'active-outage' : ''}`}
-        onClick={() => setSimulateOutage(!simulateOutage)}
-        title="Simulate GNSS Outage [O]"
+        className={`outage-toggle-btn ${showCharts ? 'active-outage' : ''}`}
+        onClick={() => setShowCharts(!showCharts)}
+        title="Toggle Charts"
       >
-        <Zap size={13} />
-        <span>{simulateOutage ? 'RESTORE GNSS' : 'SIMULATE OUTAGE'}</span>
+        <BarChart2 size={13} />
+        <span>{showCharts ? 'HIDE CHARTS' : 'SHOW CHARTS'}</span>
       </button>
     </div>
   );

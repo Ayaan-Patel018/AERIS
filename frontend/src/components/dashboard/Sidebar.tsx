@@ -1,6 +1,7 @@
 import React from 'react';
 import { useGNSSStatus } from '../../hooks/useGNSSStatus';
 import { useDashboardContext } from '../../context/DashboardContext';
+import { Zap } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
   const { 
@@ -12,7 +13,7 @@ export const Sidebar: React.FC = () => {
     currentHeading 
   } = useGNSSStatus();
   
-  const { layers, toggleLayer } = useDashboardContext();
+  const { layers, toggleLayer, simulateOutage, setSimulateOutage } = useDashboardContext();
 
   const getCardinal = (deg: number): string => {
     const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -98,8 +99,9 @@ export const Sidebar: React.FC = () => {
               type="checkbox" 
               checked={layers.gt} 
               onChange={() => toggleLayer('gt')} 
+              className="layer-toggle-input"
             />
-            <span className="layer-dot dot-gt" />
+            <div className="layer-toggle-slider slider-gt"></div>
             <span className="layer-name">Ground Truth</span>
           </label>
 
@@ -108,8 +110,9 @@ export const Sidebar: React.FC = () => {
               type="checkbox" 
               checked={layers.gnss} 
               onChange={() => toggleLayer('gnss')} 
+              className="layer-toggle-input"
             />
-            <span className="layer-dot dot-gnss" />
+            <div className="layer-toggle-slider slider-gnss"></div>
             <span className="layer-name">GNSS Raw</span>
           </label>
 
@@ -118,8 +121,9 @@ export const Sidebar: React.FC = () => {
               type="checkbox" 
               checked={layers.fused} 
               onChange={() => toggleLayer('fused')} 
+              className="layer-toggle-input"
             />
-            <span className="layer-dot dot-fused" />
+            <div className="layer-toggle-slider slider-fused"></div>
             <span className="layer-name">AERIS ES-EKF</span>
           </label>
 
@@ -128,11 +132,23 @@ export const Sidebar: React.FC = () => {
               type="checkbox" 
               checked={layers.smoothed} 
               onChange={() => toggleLayer('smoothed')} 
+              className="layer-toggle-input"
             />
-            <span className="layer-dot dot-smoothed" />
+            <div className="layer-toggle-slider slider-smoothed"></div>
             <span className="layer-name">RTS Smoothed (Analysis)</span>
           </label>
         </div>
+
+        {/* Outage Simulation Switch */}
+        <button 
+          className={`outage-toggle-btn sidebar-outage-btn ${simulateOutage ? 'active-outage' : ''}`}
+          onClick={() => setSimulateOutage(!simulateOutage)}
+          title="Simulate GNSS Outage [O]"
+          style={{ marginTop: '24px', width: '100%', justifyContent: 'center' }}
+        >
+          <Zap size={13} />
+          <span>{simulateOutage ? 'RESTORE GNSS' : 'SIMULATE OUTAGE'}</span>
+        </button>
       </div>
     </aside>
   );
