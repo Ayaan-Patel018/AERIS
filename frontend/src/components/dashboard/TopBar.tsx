@@ -34,7 +34,7 @@ export const TopBar: React.FC = () => {
   const latStr = currentFusedPos?.lat ? `${currentFusedPos.lat.toFixed(5)}°N` : '52.37045°N';
   const lonStr = currentFusedPos?.lon ? `${Math.abs(currentFusedPos.lon).toFixed(5)}°W` : '1.25444°W';
 
-  let gnssStatusText = 'GNSS AVAILABLE (100 Hz)';
+  let gnssStatusText = 'GNSS AVAILABLE';
   let gnssStatusClass = 'gnss-pill-ok';
   if (isOutage) {
     gnssStatusText = 'GNSS DENIED // DR ACTIVE';

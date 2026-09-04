@@ -13,35 +13,36 @@ interface Developer {
   description: string;
   tags: string[];
   metrics: { label: string; value: string };
+  isLeader?: boolean;
 }
 
 const DEVELOPERS: Developer[] = [
   {
     name: "Ananya Sharma",
-    role: "Research Lead / Technical Writing & UI Logic Support",
-    focus: "Data Ingestion & GNSS Outage Simulation",
+    role: "Team Leader / Research & Documentation",
+    focus: "Literature Review & Problem Statement",
     avatar: "https://github.com/ananyascodes.png",
     github: "https://github.com/ananyascodes",
     linkedin: "https://www.linkedin.com/in/ananya-sharma-dev/",
-    description: "Architected dataset loaders, schema validators, and data pipelines for the IO-VNBD Oxford/Rugby benchmark sequences. Engineered synthetic GNSS outage injection tools and WGS-84 to ENU conversions.",
-    tags: ["IO-VNBD Dataset", "ENU Projection", "Outage Simulation", "NumPy / Pandas", "Pipeline Verification"],
-    metrics: { label: "Dataset Sync", value: "6,812 Timesteps Aligned" }
+    description: "Contributed to IO-VNBD dataset literature review, problem statement research, and supporting documentation for the presentation. Spearheaded the team's direction and execution.",
+    tags: ["Team Leader", "IO-VNBD Research", "Documentation", "Problem Statement Analysis"],
+    metrics: { label: "Contribution", value: "Research & Literature Review" },
+    isLeader: true
   },
   {
-    name: "Shreya Zutshi",
-    role: "Presentation & Documentation Lead",
-    focus: "Automated Testing & Covariance Stability",
-    avatar: "https://github.com/shreyazutshi.png",
-    github: "https://github.com/shreyazutshi",
-    linkedin: "https://www.linkedin.com/in/shreya-zutshi/",
-    description: "Designed the automated test suite and regression harnesses, verifying covariance positive-definiteness, numerical conditioning, and filter stability across simulation epochs.",
-    tags: ["Automated Testing", "PSD Verification", "Numerical Conditioning", "Pytest Suite", "Filter QA"],
-    metrics: { label: "Automated Suite", value: "161/161 Tests Passed" }
+    name: "Ayaan Patel",
+    role: "Backend Engineer",
+    focus: "Navigation Core & Data Pipeline",
+    avatar: "https://github.com/Ayaan-Patel018.png",
+    github: "https://github.com/Ayaan-Patel018",
+    description: "Implemented the RTS backward smoothing pass and Zero Angular-Rate Update (ZARU) for offline drift correction, achieving a 69.1% error reduction on unseen validation data. Designed the complete backend-to-frontend JSON schema and export pipeline — data loading, ENU coordinate conversion, and the real-time/offline trajectory contract consumed by the dashboard.",
+    tags: ["RTS Smoothing", "ZARU", "JSON Schema Design", "ENU Pipeline", "Data Export"],
+    metrics: { label: "Validation Result", value: "69.1% Error Reduction (S1, unseen)" }
   },
   {
     name: "Aryan Bhadoriya",
-    role: "Frontend Engineer / UI Development & Systems Integration",
-    focus: "Frontend Cockpit & Leaflet Canvas Sync",
+    role: "Frontend Engineer",
+    focus: "UI Development & Systems Integration",
     avatar: "https://github.com/Codewiz-cpp.png",
     github: "https://github.com/Codewiz-cpp",
     linkedin: "https://www.linkedin.com/in/aryan-bhadoriya-a53a34325/",
@@ -51,35 +52,36 @@ const DEVELOPERS: Developer[] = [
   },
   {
     name: "Anurag Mishra",
-    role: "Full-Stack Engineer / Backend & Frontend Integration",
-    focus: "15-State Error-State EKF & Covariance Mechanics",
+    role: "EKF Audit & Test Engineering",
+    focus: "Backend Hardening",
     avatar: "https://github.com/anuragmishra5159.png",
     github: "https://github.com/anuragmishra5159",
     linkedin: "https://www.linkedin.com/in/anuragmishra5159/",
-    description: "Derived error-state kinematics, dynamic process noise scaling with variable time steps, Joseph-form covariance stabilization, and attitude quaternion kinematics for the 15-state ES-EKF.",
-    tags: ["15-State ES-EKF", "Quaternion Kinematics", "Covariance Mechanics", "Joseph Form", "Inertial Dead Reckoning"],
-    metrics: { label: "Filter Mechanics", value: "15-State Error Dynamics" }
+    description: "Audited the existing error-state EKF and identified three real defects: a missing attitude self-propagation term in the Jacobian, Q-matrix noise not scaling with actual per-step dt, and a structurally unreachable outage-status branch. Built the 161-case automated test suite covering covariance symmetry, PSD stability, and JSON schema validation.",
+    tags: ["EKF Audit", "Jacobian Fix", "Test Engineering", "Regression Coverage"],
+    metrics: { label: "Test Suite", value: "161/161 Tests Passed" }
   },
   {
-    name: "Ayaan Patel",
-    role: "Backend Engineer / Core Logic & API Architecture",
-    focus: "Offline RTS Smoothing & ZARU Drift Arrest",
-    avatar: "https://github.com/Ayaan-Patel018.png",
-    github: "https://github.com/Ayaan-Patel018",
-    description: "Implemented the Rauch-Tung-Striebel (RTS) backward smoothing pass and Zero Angular Rate Update (ZARU) for post-processing drift elimination, achieving up to 69.1% error reduction.",
-    tags: ["RTS Smoother", "ZARU Drift Arrest", "Backward Recursion", "Kinematic Analysis", "PyTorch / NumPy"],
-    metrics: { label: "Smoothing Gain", value: "−69.1% Error on S1" }
+    name: "Shreya Zutshi",
+    role: "Presentation & Demo Coordination",
+    focus: "Pitch Narrative & Logistics",
+    avatar: "https://github.com/shreyazutshi.png",
+    github: "https://github.com/shreyazutshi",
+    linkedin: "https://www.linkedin.com/in/shreya-zutshi/",
+    description: "Coordinated the SIH pitch narrative, slide design, and demo rehearsal logistics.",
+    tags: ["Pitch Narrative", "Slide Design", "Demo Coordination"],
+    metrics: { label: "Contribution", value: "SIH Pitch & Demo" }
   },
   {
     name: "Ananya Tiwari",
-    role: "UX Research & Content Associate",
-    focus: "Edge Optimization & Execution Profiling",
+    role: "Quality Assurance",
+    focus: "Manual Testing & UI/UX Feedback",
     avatar: "https://github.com/Ananya3107.png",
     github: "https://github.com/Ananya3107",
     linkedin: "https://www.linkedin.com/in/ananya-tiwari-devs/",
-    description: "Evaluated algorithmic execution constraints, edge compute latency, and memory profiling to ensure zero-latency operation for embedded automotive deployment.",
-    tags: ["Embedded Systems", "Latency Profiling", "Hardware Constraints", "Edge Optimization", "QA Verification"],
-    metrics: { label: "Compute Budget", value: "< 10ms Real-Time Latency" }
+    description: "Performed manual testing and UI/UX feedback throughout development, reporting issues and usability concerns to the engineering team.",
+    tags: ["Manual Testing", "UI/UX Feedback", "Bug Reporting"],
+    metrics: { label: "Contribution", value: "QA & Usability Testing" }
   }
 ];
 
@@ -197,7 +199,8 @@ export const DevelopersPage: React.FC = () => {
         {/* Member Cards Grid */}
         <section className="devs-grid">
           {DEVELOPERS.map((dev) => (
-            <div key={dev.name} className="dev-card">
+            <div key={dev.name} className={`dev-card ${dev.isLeader ? 'dev-leader-card' : ''}`}>
+              {dev.isLeader && <div className="dev-leader-badge">TEAM LEADER</div>}
               <div className="b-dot tl"></div>
               <div className="b-dot tr"></div>
               <div className="b-dot bl"></div>

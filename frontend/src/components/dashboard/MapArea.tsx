@@ -82,10 +82,6 @@ export const MapArea: React.FC = () => {
       subdomains: config.subdomains ?? ['a', 'b', 'c'],
     }).addTo(map);
 
-    map.on('dragstart', () => {
-      setAutoFollow(false);
-    });
-
     mapRef.current = map;
 
     return () => {
@@ -143,6 +139,7 @@ export const MapArea: React.FC = () => {
       prevPos: TrajectoryPoint | undefined,
       refStorage: { current: number }
     ): number => {
+      // Fallback: use exact heading from backend if available
       if (pos?.heading !== undefined && !isNaN(pos.heading)) {
         const rad = ((pos.heading - 90) * Math.PI) / 180;
         refStorage.current = rad;
@@ -226,7 +223,7 @@ export const MapArea: React.FC = () => {
       (layers.gnss ? 1 : 0) + (layers.fused ? 1 : 0) + (layers.smoothed ? 1 : 0);
 
     // ── 5A. Render GNSS Raw Vehicle Arrow ────────────────────────
-    if (layers.gnss && currentGnssPos && currentGnssPos.lat !== undefined && currentGnssPos.lon !== undefined) {
+    if (layers.gnss && currentGnssPos && currentGnssPos.status !== 'unavailable' && currentGnssPos.lat !== undefined && currentGnssPos.lon !== undefined) {
       const pt = toPixel(currentGnssPos.lat, currentGnssPos.lon);
       const prev = currentIndex > 0 ? gnss[currentIndex - 1] : undefined;
       const h = getHeadingRad(currentGnssPos, prev, lastGnssHeadingRef);
@@ -329,7 +326,7 @@ export const MapArea: React.FC = () => {
       else if (layers.gnss) pos = currentGnssPos;
 
       if (pos && pos.lat !== undefined && pos.lon !== undefined) {
-        map.panTo([pos.lat, pos.lon], { animate: false });
+        map.panInside([pos.lat, pos.lon], { padding: [100, 100], animate: false });
       }
     }
     renderCanvas();

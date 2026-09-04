@@ -32,7 +32,6 @@ export const Navbar: React.FC = () => {
         {/* Brand / Logo */}
         <Link to="/" className="navbar-brand" title="AERIS Dead Reckoning Navigation">
           <img src={aerisLogo} alt="AERIS Logo" className="navbar-logo-img" />
-          <span className="navbar-brand-badge">SIH 26168</span>
         </Link>
 
         {/* Center Nav Links */}

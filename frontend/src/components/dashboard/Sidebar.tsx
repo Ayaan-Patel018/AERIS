@@ -22,7 +22,7 @@ export const Sidebar: React.FC = () => {
 
   const carrierBars = isOutage ? 0 : 5;
   const satFixText = isOutage ? 'SEARCHING (0 SATS)' : 'LOCKED (11 SATS)';
-  const gnssAvailText = isOutage ? 'UNAVAILABLE (OUTAGE)' : 'AVAILABLE (100 Hz)';
+  const gnssAvailText = isOutage ? 'UNAVAILABLE (OUTAGE)' : 'AVAILABLE';
   const gnssAvailClass = isOutage ? 'val-warn' : 'val-ok';
 
   return (
@@ -139,16 +139,7 @@ export const Sidebar: React.FC = () => {
           </label>
         </div>
 
-        {/* Outage Simulation Switch */}
-        <button 
-          className={`outage-toggle-btn sidebar-outage-btn ${simulateOutage ? 'active-outage' : ''}`}
-          onClick={() => setSimulateOutage(!simulateOutage)}
-          title="Simulate GNSS Outage [O]"
-          style={{ marginTop: '24px', width: '100%', justifyContent: 'center' }}
-        >
-          <Zap size={13} />
-          <span>{simulateOutage ? 'RESTORE GNSS' : 'SIMULATE OUTAGE'}</span>
-        </button>
+
       </div>
     </aside>
   );
