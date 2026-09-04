@@ -139,6 +139,11 @@ export const MapArea: React.FC = () => {
       prevPos: TrajectoryPoint | undefined,
       refStorage: { current: number }
     ): number => {
+      if (pos?.heading !== undefined && !isNaN(pos.heading)) {
+        const rad = ((pos.heading - 90) * Math.PI) / 180;
+        refStorage.current = rad;
+        return rad;
+      }
       if (
         pos?.lat !== undefined &&
         pos?.lon !== undefined &&
@@ -217,7 +222,7 @@ export const MapArea: React.FC = () => {
       (layers.gnss ? 1 : 0) + (layers.fused ? 1 : 0) + (layers.smoothed ? 1 : 0);
 
     // ── 5A. Render GNSS Raw Vehicle Arrow ────────────────────────
-    if (layers.gnss && currentGnssPos && currentGnssPos.lat !== undefined && currentGnssPos.lon !== undefined) {
+    if (layers.gnss && currentGnssPos && currentGnssPos.status !== 'unavailable' && currentGnssPos.lat !== undefined && currentGnssPos.lon !== undefined) {
       const pt = toPixel(currentGnssPos.lat, currentGnssPos.lon);
       const prev = currentIndex > 0 ? gnss[currentIndex - 1] : undefined;
       const h = getHeadingRad(currentGnssPos, prev, lastGnssHeadingRef);
