@@ -38,11 +38,11 @@ SIGMA_GYRO_NOISE    = 0.005    # rad/s   gyroscope noise density
 SIGMA_ACCEL_BIAS    = 1e-4     # m/s²/s  accel bias random walk
 SIGMA_GYRO_BIAS     = 1e-5     # rad/s/s gyro bias random walk
 
-SIGMA_GNSS_POS      = 3.0      # m       GPS position noise (horizontal)
+SIGMA_GNSS_POS      = 0.5      # m       GPS position noise (horizontal) — tight alignment with GNSS
 SIGMA_GNSS_VEL      = 0.3      # m/s     GPS velocity noise
 
-SIGMA_NHC_LAT       = 0.05     # m/s     lateral velocity pseudo-noise (NHC)
-SIGMA_NHC_VERT      = 0.05     # m/s     vertical velocity pseudo-noise (NHC)
+SIGMA_NHC_LAT       = 0.5      # m/s     lateral velocity pseudo-noise (NHC) — realistic body frame compliance
+SIGMA_NHC_VERT      = 0.5      # m/s     vertical velocity pseudo-noise (NHC)
 
 SIGMA_ZARU          = 0.01     # rad/s   near-zero angular rate noise (ZARU, at confirmed stops)
 
