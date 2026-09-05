@@ -38,7 +38,11 @@ SIGMA_GYRO_NOISE    = 0.005    # rad/s   gyroscope noise density
 SIGMA_ACCEL_BIAS    = 1e-4     # m/s²/s  accel bias random walk
 SIGMA_GYRO_BIAS     = 1e-5     # rad/s/s gyro bias random walk
 
-SIGMA_GNSS_POS      = 0.5      # m       GPS position noise (horizontal) — tight alignment with GNSS
+SIGMA_GNSS_POS      = 2.0      # m       GPS position noise (horizontal) — physically calibrated to
+                               #          smartphone GPS typical 1-sigma CEP (~2–4 m for modern phones).
+                               #          Previously 0.5 m (overconfident) as a compensating hack for the
+                               #          stale-GPS bug below. Now that stale-GPS gating is fixed, this
+                               #          matches the OS-reported gps_accuracy_m distribution (3–6 m 95%).
 SIGMA_GNSS_VEL      = 0.3      # m/s     GPS velocity noise
 
 SIGMA_NHC_LAT       = 0.5      # m/s     lateral velocity pseudo-noise (NHC) — realistic body frame compliance
@@ -491,6 +495,20 @@ def run_pipeline(
     smooth_dx_upd = []
     zaru_trigger_count = 0
 
+    # ── Stale-GPS gating ─────────────────────────────────────────────────
+    # Smartphone GPS typically delivers new fixes at ~1 Hz while the IMU
+    # runs at 10 Hz. Without gating, the same (lat, lon) fix would be
+    # injected as a GNSS measurement on every one of the ~9 IMU steps
+    # between two GPS epochs, inflating the filter's information 9-fold and
+    # biasing covariance collapse. The fix: only call update_gnss_position /
+    # update_gnss_velocity when the GPS output has actually changed.
+    # gnss_flag (availability) is unchanged — it reflects receiver lock
+    # status, not whether we applied an update this step.
+    _prev_gps_lat: Optional[float] = None
+    _prev_gps_lon: Optional[float] = None
+    _prev_gps_spd: Optional[float] = None
+    _prev_gps_hdg: Optional[float] = None
+
     for i in range(1, n):
         row_prev = s_df.iloc[i-1]
         row      = s_df.iloc[i]
@@ -562,18 +580,38 @@ def run_pipeline(
             if (recent_speeds < 0.3).all() and not recent_speeds.isna().any():
                 zupt_active = True
 
-        # ── GNSS update ───────────────────────────────────────────────────
+        # ── GNSS update (stale-gated) ─────────────────────────────────────
+        # Only apply a position update when the lat/lon has genuinely changed
+        # since the last step. Smartphone GPS fixes at ~1 Hz; re-injecting the
+        # same fix at 10 Hz would inflate information ~9× and cause covariance
+        # collapse without matching physical information content.
         if gnss_available:
-            gps_enu = latlon_to_enu(
-                row["gps_lat"], row["gps_lon"], lat0, lon0
+            cur_lat = row["gps_lat"]
+            cur_lon = row["gps_lon"]
+            is_new_pos_fix = (
+                _prev_gps_lat is None
+                or cur_lat != _prev_gps_lat
+                or cur_lon != _prev_gps_lon
             )
-            ekf.update_gnss_position(state, gps_enu, quality=gps_quality)
+            if is_new_pos_fix:
+                gps_enu = latlon_to_enu(cur_lat, cur_lon, lat0, lon0)
+                ekf.update_gnss_position(state, gps_enu, quality=gps_quality)
+                _prev_gps_lat = cur_lat
+                _prev_gps_lon = cur_lon
 
-            if not np.isnan(row["gps_speed_ms"]) and not np.isnan(row["gps_heading_deg"]):
-                gps_vel = gps_to_enu_velocity(
-                    row["gps_speed_ms"], row["gps_heading_deg"]
-                )
+            cur_spd = row["gps_speed_ms"]
+            cur_hdg = row["gps_heading_deg"]
+            is_new_vel_fix = (
+                not np.isnan(cur_spd) and not np.isnan(cur_hdg)
+                and (_prev_gps_spd is None
+                     or cur_spd != _prev_gps_spd
+                     or cur_hdg != _prev_gps_hdg)
+            )
+            if is_new_vel_fix:
+                gps_vel = gps_to_enu_velocity(cur_spd, cur_hdg)
                 ekf.update_gnss_velocity(state, gps_vel)
+                _prev_gps_spd = cur_spd
+                _prev_gps_hdg = cur_hdg
 
         # ── NHC update ────────────────────────────────────────────────────
         if cfg["use_nhc"]:
