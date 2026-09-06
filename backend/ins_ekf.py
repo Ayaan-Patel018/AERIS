@@ -78,7 +78,12 @@ def quat_mult(p, q):
 
 
 def quat_normalize(q):
-    return q / np.linalg.norm(q)
+    """Normalize quaternion. Returns identity [1,0,0,0] if norm is zero or non-finite
+    (guards against silent NaN cascade when IMU spikes or sensors drop out)."""
+    n = np.linalg.norm(q)
+    if n < 1e-9 or not np.isfinite(n):
+        return np.array([1., 0., 0., 0.])  # safe identity — no rotation
+    return q / n
 
 
 def quat_to_rot(q):
@@ -328,14 +333,36 @@ class ESEKF:
     def update_gnss_position(self, state: NominalState,
                              gps_enu: np.ndarray,
                              quality: str = "healthy") -> None:
-        """GNSS position update — noise scales with quality classification."""
-        # Polish 1: adaptive noise based on GNSS classifier output
+        """GNSS position update with Mahalanobis outlier gate.
+
+        Adaptive noise scales with GNSS quality classification.
+        Mahalanobis gating rejects multipath spikes (urban canyons, tunnel exits,
+        overpasses) where satellite count looks healthy but position is wrong by
+        50–200 m. Without gating, even one bad fix would drag the filter off-course
+        and take 30–60 s to recover.
+        """
+        # Adaptive noise based on GNSS quality classifier
         noise_scale = {"healthy": 1.0, "degraded": 3.0, "unavailable": 10.0}
         scale = noise_scale.get(quality, 1.0)
         H = np.zeros((3, self.n))
         H[0:3, 0:3] = np.eye(3)
         R = np.eye(3) * (SIGMA_GNSS_POS * scale)**2
         z = gps_enu - state.p
+
+        # ── Mahalanobis chi-squared gate ──────────────────────────────────
+        # Reject fixes where the innovation is implausibly large given the
+        # current position uncertainty. Chi-squared threshold with 3 DOF:
+        #   5σ → chi2 threshold = 25 (rejects <1-in-3.5M genuine fixes)
+        # During GNSS outage recovery the covariance P grows large, so the
+        # gate automatically widens — large innovations are accepted when
+        # there is genuine positional uncertainty, rejected when the filter
+        # is confident and sees an outlier.
+        S = H @ self.P @ H.T + R   # 3×3 innovation covariance
+        maha_sq = float(z @ np.linalg.solve(S, z))
+        CHI2_THRESHOLD = 25.0      # 5σ for 3-DOF chi-squared
+        if maha_sq > CHI2_THRESHOLD:
+            return   # outlier — reject silently, do not corrupt filter state
+
         self._update(H, R, z)
 
     def update_gnss_velocity(self, state: NominalState,
@@ -519,7 +546,15 @@ def run_pipeline(
 
         ekf.dt = dt
 
-        # ── IMU ──────────────────────────────────────────────────────────
+        # ── IMU (with NaN/spike guard) ────────────────────────────────────
+        # Real phones occasionally emit NaN rows (USB reconnect, sensor start)
+        # or spike rows (OS sensor overflow). Without guards, a single NaN
+        # propagates through the quaternion math and produces a NaN state for
+        # the entire remaining trajectory — silently, with no exception.
+        # Physical limits: a car cannot sustain >5g or >500 deg/s in any axis.
+        _MAX_ACCEL = 50.0    # m/s²  — 5g hard limit for ground vehicle
+        _MAX_GYRO  = 10.0    # rad/s — ~573 deg/s hard limit
+
         accel = np.array([
             row["linear_accel_x"],
             row["linear_accel_y"],
@@ -534,6 +569,14 @@ def run_pipeline(
             row["gyro_pitch_rads"],
             row["gyro_yaw_rads"],
         ])
+
+        # Guard: replace bad IMU readings with zero (coast through bad frame)
+        if (not np.all(np.isfinite(accel))
+                or np.linalg.norm(accel) > _MAX_ACCEL):
+            accel = np.zeros(3)   # zero specific force — filter coasts
+        if (not np.all(np.isfinite(gyro))
+                or np.linalg.norm(gyro) > _MAX_GYRO):
+            gyro = np.zeros(3)    # zero angular rate — attitude holds
 
         # ── INS propagation ───────────────────────────────────────────────
         state = ins_propagate(state, accel, gyro, dt)
@@ -555,17 +598,23 @@ def run_pipeline(
         if gnss_available:
             gnss_flag = "outage" if in_outage else "healthy"
 
-        # ── Polish 1: GNSS quality classification ─────────────────────────
-        # Compute per-step quality before the EKF update
+        # ── GNSS quality classification ───────────────────────────────────
+        # NaN-safe: treat NaN satellite count as 0 (worst case) and NaN
+        # accuracy as 999 m (worst case). Without this, NaN comparisons in
+        # Python always return False, so a row with NaN satellites would be
+        # silently classified as "healthy" — passing multipath/poor fixes.
         gps_quality = "unavailable"
         if gnss_available:
-            sats     = row.get("gps_satellites", 15)
-            acc      = row.get("gps_accuracy_m", 3.0)
+            sats = row.get("gps_satellites", 15)
+            acc  = row.get("gps_accuracy_m",  3.0)
+            # Replace NaN with conservative worst-case values
+            if np.isnan(sats): sats = 0.0
+            if np.isnan(acc):  acc  = 999.0
             # Simple inline classification (mirrors GNSSQualityClassifier)
-            if np.isnan(sats) or sats < 6:
-                gps_quality = "unavailable"
+            if sats < 6:
+                gps_quality    = "unavailable"
                 gnss_available = False
-            elif sats < 8 or (not np.isnan(acc) and acc > 10.0):
+            elif sats < 8 or acc > 10.0:
                 gps_quality = "degraded"
                 gnss_flag   = "degraded"
             else:
