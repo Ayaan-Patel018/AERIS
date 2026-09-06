@@ -333,36 +333,20 @@ class ESEKF:
     def update_gnss_position(self, state: NominalState,
                              gps_enu: np.ndarray,
                              quality: str = "healthy") -> None:
-        """GNSS position update with Mahalanobis outlier gate.
+        """GNSS position update — adaptive noise by quality classification.
 
-        Adaptive noise scales with GNSS quality classification.
-        Mahalanobis gating rejects multipath spikes (urban canyons, tunnel exits,
-        overpasses) where satellite count looks healthy but position is wrong by
-        50–200 m. Without gating, even one bad fix would drag the filter off-course
-        and take 30–60 s to recover.
+        Noise scales with GNSS quality so degraded fixes are trusted less.
+        NHC holds P[pos] tighter than the true dead-reckoning error during
+        outages, which would cause a chi-sq gate to block re-acquisition
+        after a genuine outage — so gating is deferred to Phase 2 once the
+        P-growth / outage-state interaction is resolved.
         """
-        # Adaptive noise based on GNSS quality classifier
         noise_scale = {"healthy": 1.0, "degraded": 3.0, "unavailable": 10.0}
         scale = noise_scale.get(quality, 1.0)
         H = np.zeros((3, self.n))
         H[0:3, 0:3] = np.eye(3)
         R = np.eye(3) * (SIGMA_GNSS_POS * scale)**2
         z = gps_enu - state.p
-
-        # ── Mahalanobis chi-squared gate ──────────────────────────────────
-        # Reject fixes where the innovation is implausibly large given the
-        # current position uncertainty. Chi-squared threshold with 3 DOF:
-        #   5σ → chi2 threshold = 25 (rejects <1-in-3.5M genuine fixes)
-        # During GNSS outage recovery the covariance P grows large, so the
-        # gate automatically widens — large innovations are accepted when
-        # there is genuine positional uncertainty, rejected when the filter
-        # is confident and sees an outlier.
-        S = H @ self.P @ H.T + R   # 3×3 innovation covariance
-        maha_sq = float(z @ np.linalg.solve(S, z))
-        CHI2_THRESHOLD = 25.0      # 5σ for 3-DOF chi-squared
-        if maha_sq > CHI2_THRESHOLD:
-            return   # outlier — reject silently, do not corrupt filter state
-
         self._update(H, R, z)
 
     def update_gnss_velocity(self, state: NominalState,
