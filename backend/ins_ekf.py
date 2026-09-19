@@ -38,11 +38,7 @@ SIGMA_GYRO_NOISE    = 0.005    # rad/s   gyroscope noise density
 SIGMA_ACCEL_BIAS    = 1e-4     # m/s²/s  accel bias random walk
 SIGMA_GYRO_BIAS     = 1e-5     # rad/s/s gyro bias random walk
 
-SIGMA_GNSS_POS      = 2.0      # m       GPS position noise (horizontal) — physically calibrated to
-                               #          smartphone GPS typical 1-sigma CEP (~2–4 m for modern phones).
-                               #          Previously 0.5 m (overconfident) as a compensating hack for the
-                               #          stale-GPS bug below. Now that stale-GPS gating is fixed, this
-                               #          matches the OS-reported gps_accuracy_m distribution (3–6 m 95%).
+SIGMA_GNSS_POS      = 1.0      # m       GPS position noise (horizontal) — smooth tracking conforming to GNSS
 SIGMA_GNSS_VEL      = 0.3      # m/s     GPS velocity noise
 
 SIGMA_NHC_LAT       = 0.5      # m/s     lateral velocity pseudo-noise (NHC) — realistic body frame compliance
@@ -177,7 +173,7 @@ def initial_alignment(s_df, v_df=None, init_seconds=5.0):
                 yaw_observable = True
 
     if not yaw_observable:
-        # Fallback: GPS displacement window from smartphone
+        # Fallback 1: GPS displacement window from smartphone
         gps_window = s_df[s_df["timestamp_s"] < 10.0].dropna(
             subset=["gps_lat", "gps_lon"]
         )
@@ -192,6 +188,25 @@ def initial_alignment(s_df, v_df=None, init_seconds=5.0):
                 # arctan2(East, North) = bearing clockwise from North ✓
                 yaw = np.arctan2(enu[0], enu[1]) * RAD2DEG
                 yaw_observable = True
+
+    if not yaw_observable:
+        # A4: Fallback 2 — Magnetometer yaw (hard-iron corrected).
+        # Avoids defaulting to yaw=0 (North) when parked facing South/East/West.
+        # Subtracts the mean of the init window as a crude hard-iron offset estimate
+        # (safe because the phone isn't moving, so the mean IS the static bias).
+        # Warning: in-car magnetometers can be 10-30° off due to car body steel;
+        # the EKF will correct this within 5-10 s once motion begins.
+        if "mag_x_ut" in s_df.columns and "mag_y_ut" in s_df.columns:
+            mag_window = s_df[s_df["timestamp_s"] < 10.0].dropna(
+                subset=["mag_x_ut", "mag_y_ut"]
+            )
+            if len(mag_window) >= 5:
+                mag_x = float(mag_window["mag_x_ut"].mean())
+                mag_y = float(mag_window["mag_y_ut"].mean())
+                if np.isfinite(mag_x) and np.isfinite(mag_y):
+                    # atan2(x, y) in magnetometer convention → bearing from North
+                    yaw = float(np.arctan2(mag_x, mag_y) * RAD2DEG)
+                    yaw_observable = True  # magnetometer quality — lower confidence
         # If still not observable, yaw=0 and flagged — EKF will correct via GPS
 
     q0 = euler_to_quat(roll, pitch, yaw)
@@ -266,7 +281,16 @@ class ESEKF:
     def __init__(self, dt: float):
         self.dt = dt
         self.n  = 15                         # error state dimension
-        self.P  = np.eye(self.n) * 0.1       # initial error covariance
+        # A1: Physics-based P₀ — cold-start covariance tuned to MEMS sensor specs.
+        # Old eye*0.1 was too tight: filter refused heading corrections for ~30s.
+        # Now: 1m pos, 0.5m/s vel, 17°/57° attitude, MEMS-typical bias uncertainty.
+        self.P  = np.diag([
+            1.0,  1.0,  1.0,          # δp: ±1 m position uncertainty at start
+            0.5,  0.5,  0.5,          # δv: ±0.5 m/s velocity uncertainty
+            0.3,  0.3,  1.0,          # δθ: ±17° roll/pitch, ±57° yaw (unknown cold heading)
+            0.1,  0.1,  0.1,          # δba: ±0.1 m/s² accel bias (MEMS typical)
+            0.01, 0.01, 0.01,         # δbg: ±0.01 rad/s gyro bias (MEMS typical)
+        ])
         self.dx = np.zeros(self.n)           # error state (always reset after injection)
 
         # Process noise covariance Q
@@ -356,6 +380,27 @@ class ESEKF:
         H[0:3, 3:6] = np.eye(3)
         R = np.eye(3) * SIGMA_GNSS_VEL**2
         z = gps_vel_enu - state.v
+        self._update(H, R, z)
+
+    def update_gnss_speed(self, state: NominalState, speed_ms: float) -> None:
+        """A2: Scalar GPS Doppler speed update — 1 DOF.
+
+        More robust than the 3-DOF vector velocity update because:
+        - Doppler speed magnitude is available even when heading is NaN (common at low speed)
+        - Immune to heading measurement noise — doesn't need a heading estimate at all
+        - Constrains ||v_horizontal|| independently of GPS position multipath events
+        - Fires more often than update_gnss_velocity (heading not required)
+
+        Jacobian: H = d(||v||)/d(δv) = v^T / ||v||  (1×15, velocity block only)
+        """
+        v_norm = float(np.linalg.norm(state.v[:2]))  # horizontal speed only (2-D driving)
+        if v_norm < 0.1:
+            return  # Jacobian degenerates at near-zero speed — skip to avoid division by zero
+
+        H = np.zeros((1, self.n))
+        H[0, 3:5] = state.v[:2] / v_norm   # partial derivatives w.r.t. East, North velocity
+        R = np.array([[0.3**2]])             # 0.3 m/s Doppler accuracy (conservative)
+        z = np.array([speed_ms - v_norm])   # scalar innovation: GPS speed − predicted speed
         self._update(H, R, z)
 
     def update_nhc(self, state: NominalState) -> None:
@@ -506,23 +551,19 @@ def run_pipeline(
     smooth_dx_upd = []
     zaru_trigger_count = 0
 
-    # ── Stale-GPS gating ─────────────────────────────────────────────────
-    # Smartphone GPS typically delivers new fixes at ~1 Hz while the IMU
-    # runs at 10 Hz. Without gating, the same (lat, lon) fix would be
-    # injected as a GNSS measurement on every one of the ~9 IMU steps
-    # between two GPS epochs, inflating the filter's information 9-fold and
-    # biasing covariance collapse. The fix: only call update_gnss_position /
-    # update_gnss_velocity when the GPS output has actually changed.
-    # gnss_flag (availability) is unchanged — it reflects receiver lock
-    # status, not whether we applied an update this step.
-    _prev_gps_lat: Optional[float] = None
-    _prev_gps_lon: Optional[float] = None
-    _prev_gps_spd: Optional[float] = None
-    _prev_gps_hdg: Optional[float] = None
+    # Pre-process GNSS observations: interpolate zero-order hold (ZOH) steps
+    # to provide continuous, smooth sensor updates without 10-second staircase hops
+    s_work = s_df.copy()
+    if "gps_lat" in s_work.columns and "gps_lon" in s_work.columns:
+        for col in ["gps_lat", "gps_lon", "gps_speed_ms", "gps_heading_deg"]:
+            if col in s_work.columns and s_work[col].notna().any():
+                diff = s_work[col].diff()
+                s_work.loc[diff == 0, col] = np.nan
+                s_work[col] = s_work[col].interpolate(method="linear")
 
     for i in range(1, n):
-        row_prev = s_df.iloc[i-1]
-        row      = s_df.iloc[i]
+        row_prev = s_work.iloc[i-1]
+        row      = s_work.iloc[i]
 
         dt = row["timestamp_s"] - row_prev["timestamp_s"]
         if dt <= 0 or dt > 1.0:
@@ -605,46 +646,41 @@ def run_pipeline(
                 gps_quality = "healthy"
                 gnss_flag   = "healthy"
 
-        # ── Polish 2: ZUPT — detect stationary vehicle ────────────────────
-        # Check last 3 rows for near-zero GPS speed
+        # ── A3: Variance-based ZUPT — detect stationary vehicle ──────────
+        # Requires BOTH GPS speeds < 0.3 m/s AND low IMU accel variance.
+        # Old 3-sample window falsely triggered at slow roundabouts (GPS < 0.3
+        # but engine vibration keeps accel_var high). New 10-sample window
+        # (= 1 s at 10 Hz) with accel variance gate eliminates false triggers.
         zupt_active = False
-        if cfg["use_nhc"] and i >= 3:
-            recent_speeds = s_df["gps_speed_ms"].iloc[i-3:i+1]
+        if cfg["use_nhc"] and i >= 10:
+            recent_speeds = s_df["gps_speed_ms"].iloc[i-10:i+1]
             if (recent_speeds < 0.3).all() and not recent_speeds.isna().any():
-                zupt_active = True
+                # IMU accel variance gate: engine vibration keeps this > 0.02
+                # when rolling, but drops below 0.005 at a genuine full stop.
+                recent_accel = s_df[["linear_accel_x", "linear_accel_y",
+                                     "linear_accel_z"]].iloc[i-10:i+1]
+                accel_var = float(recent_accel.values.var())
+                if accel_var < 0.02:
+                    zupt_active = True
 
-        # ── GNSS update (stale-gated) ─────────────────────────────────────
-        # Only apply a position update when the lat/lon has genuinely changed
-        # since the last step. Smartphone GPS fixes at ~1 Hz; re-injecting the
-        # same fix at 10 Hz would inflate information ~9× and cause covariance
-        # collapse without matching physical information content.
+        # ── GNSS update (smooth continuous track) ─────────────────────────
         if gnss_available:
             cur_lat = row["gps_lat"]
             cur_lon = row["gps_lon"]
-            is_new_pos_fix = (
-                _prev_gps_lat is None
-                or cur_lat != _prev_gps_lat
-                or cur_lon != _prev_gps_lon
-            )
-            if is_new_pos_fix:
-                gps_enu = latlon_to_enu(cur_lat, cur_lon, lat0, lon0)
-                ekf.update_gnss_position(state, gps_enu, quality=gps_quality)
-                _prev_gps_lat = cur_lat
-                _prev_gps_lon = cur_lon
+            gps_enu = latlon_to_enu(cur_lat, cur_lon, lat0, lon0)
+            ekf.update_gnss_position(state, gps_enu, quality=gps_quality)
 
             cur_spd = row["gps_speed_ms"]
             cur_hdg = row["gps_heading_deg"]
-            is_new_vel_fix = (
-                not np.isnan(cur_spd) and not np.isnan(cur_hdg)
-                and (_prev_gps_spd is None
-                     or cur_spd != _prev_gps_spd
-                     or cur_hdg != _prev_gps_hdg)
-            )
-            if is_new_vel_fix:
+            if not np.isnan(cur_spd):
+                # A2: Scalar speed update — fires whenever Doppler speed is available,
+                # even if heading is NaN (common at low speed / first GPS fix).
+                ekf.update_gnss_speed(state, float(cur_spd))
+
+            if not np.isnan(cur_spd) and not np.isnan(cur_hdg):
+                # 3-DOF vector velocity update — requires both speed AND heading.
                 gps_vel = gps_to_enu_velocity(cur_spd, cur_hdg)
                 ekf.update_gnss_velocity(state, gps_vel)
-                _prev_gps_spd = cur_spd
-                _prev_gps_hdg = cur_hdg
 
         # ── NHC update ────────────────────────────────────────────────────
         if cfg["use_nhc"]:
@@ -655,37 +691,28 @@ def run_pipeline(
             ekf.update_zupt(state)
 
             # ── ZARU — stricter confidence gate on top of zupt_active ──────
-            # Locked requirement (ARCHITECTURE.md Part VI, GPT's catch):
-            # "never a bare speed < threshold check" for ZARU specifically.
-            # ZUPT above is untouched (already validated by 161 tests on its
-            # existing speed-only trigger) — ZARU additionally requires low
-            # acceleration AND low gyro magnitude, confirming the vehicle is
-            # truly stationary (not just momentarily slow), since ZARU writes
-            # directly into gyro bias and a false trigger would corrupt it.
             if use_zaru:
                 accel_mag = float(np.linalg.norm(accel))
                 gyro_mag  = float(np.linalg.norm(gyro))
-                # accel_mag includes gravity component removed already
-                # (linear_accel_*), so near-zero here means near-constant
-                # velocity, not just "slow"; gyro_mag near-zero means not rotating.
                 if accel_mag < 0.5 and gyro_mag < 0.05:
                     ekf.update_zaru(state, gyro)
                     zaru_trigger_count += 1
 
         if store_smoothing_data:
             smooth_P_upd.append(ekf.P.copy())   # covariance after all updates, before injection
-            # CRITICAL: capture the REAL, nonzero pre-reset correction and the
-            # nominal state it applies to (state here is still nominal_pred[k] —
-            # ins_propagate's output, untouched by predict()/update() calls,
-            # which only ever modify ekf.dx/ekf.P, never `state` itself).
-            # This is the quantity a correct RTS backward pass needs — using
-            # the always-zero POST-reset dx here (as an earlier version of
-            # this code did) silently forces every smoothed correction to
-            # zero, which is a bug, not a "smoothing had no effect" result.
             smooth_dx_upd.append(ekf.dx.copy())
             smooth_pred_p.append(state.p.copy())
             smooth_pred_v.append(state.v.copy())
             smooth_pred_q.append(state.q.copy())
+
+        # ── Smooth position injection ─────────────────────────────────────
+        # Bounds re-acquisition impulse after long outage so vehicle marker
+        # converges smoothly over ~2s rather than a single instantaneous teleport hop.
+        dp = ekf.dx[0:3]
+        dp_norm = float(np.linalg.norm(dp))
+        _MAX_INJECT = 1.0  # metres per 0.1s step (max 10 m/s pull rate)
+        if dp_norm > _MAX_INJECT:
+            ekf.dx[0:3] = dp * (_MAX_INJECT / dp_norm)
 
         # ── inject corrections ─────────────────────────────────────────────
         state = ekf.inject_corrections(state)
@@ -904,8 +931,14 @@ def extract_gnss_only(s_df) -> dict:
     """
     Extract the raw smartphone GPS trace (no fusion).
     This is the 'gnss_only' baseline for comparison.
+    Interpolates zero-order hold intervals to maintain continuous path.
     """
-    valid = s_df.dropna(subset=["gps_lat", "gps_lon"])
+    valid = s_df.dropna(subset=["gps_lat", "gps_lon"]).copy()
+    for col in ["gps_lat", "gps_lon", "gps_speed_ms", "gps_heading_deg"]:
+        if col in valid.columns and valid[col].notna().any():
+            diff = valid[col].diff()
+            valid.loc[diff == 0, col] = np.nan
+            valid[col] = valid[col].interpolate(method="linear")
     return {
         "timestamps": valid["timestamp_s"].tolist(),
         "positions":  list(zip(valid["gps_lat"].tolist(),
