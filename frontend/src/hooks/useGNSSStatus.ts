@@ -14,7 +14,7 @@ export const TOTAL_DURATION = 681.1;
 const REACQUIRED_WINDOW = 0.05;
 
 export const useGNSSStatus = () => {
-  const { simulateOutage, manualOutageStart, progress } = useDashboardContext();
+  const { simulateOutage, manualOutageStart, progress, outageStartSec, outageEndSec } = useDashboardContext();
   const { fused, currentIndex, currentFusedPos } = useTrajectoryData();
 
   const realStatus = currentFusedPos?.status ?? 'healthy';
@@ -22,13 +22,15 @@ export const useGNSSStatus = () => {
 
   const isOutage = simulateOutage ? true : realOutage;
 
+  const currentOutageEnd = (outageEndSec ?? 260) / TOTAL_DURATION;
+
   // "REACQUIRED" only makes sense just AFTER an outage — not any healthy
   // moment (the old logic showed it at playback start, before any outage).
   const isRecovered =
     !simulateOutage &&
     realStatus === 'healthy' &&
-    progress > OUTAGE_END &&
-    progress <= OUTAGE_END + REACQUIRED_WINDOW;
+    progress > currentOutageEnd &&
+    progress <= currentOutageEnd + REACQUIRED_WINDOW;
 
   const uncertainty = currentFusedPos?.uncertainty ?? 0;
   const currentVelocity = (currentFusedPos?.velocity ?? 0) * 3.6; // m/s -> km/h

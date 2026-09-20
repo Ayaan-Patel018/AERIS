@@ -7,7 +7,7 @@ import { BarChart2 } from 'lucide-react';
 export const BottomBar: React.FC = () => {
   const { speed, setSpeed, isPlaying, setIsPlaying, setProgress, simulateOutage, setSimulateOutage, showCharts, setShowCharts } = useDashboardContext();
 
-  const speeds = [0.5, 1, 2, 4];
+  const speeds = [0.5, 1, 2, 4, 8];
 
   // Keyboard Shortcuts
   useEffect(() => {
@@ -51,6 +51,16 @@ export const BottomBar: React.FC = () => {
           </button>
         ))}
       </div>
+
+      {/* Quick Jump to Outage */}
+      <button 
+        className="outage-toggle-btn"
+        onClick={() => setProgress(0.298)}
+        title="Jump directly to the 60-second GNSS blackout zone"
+        style={{ borderColor: 'rgba(229, 72, 77, 0.4)', color: '#FF7B7F' }}
+      >
+        <span>⚡ 60s OUTAGE</span>
+      </button>
 
       {/* Charts Toggle */}
       <button 
