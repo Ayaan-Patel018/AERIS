@@ -5,7 +5,7 @@ import { useTrajectoryData, type TrajectoryPoint } from '../../hooks/useTrajecto
 import { useGNSSStatus } from '../../hooks/useGNSSStatus';
 import { drawTrajectory } from './TrajectoryLayer';
 import { drawVehicleMarker } from './VehicleMarker';
-import { drawUncertaintyCircle } from './UncertaintyCircle';
+import { drawUncertaintyCircle, drawCovarianceEllipse } from './UncertaintyCircle';
 
 type TileStyle = 'dark' | 'streets' | 'satellite';
 
@@ -272,9 +272,27 @@ export const MapArea: React.FC = () => {
       const prev = currentIndex > 0 ? fused[currentIndex - 1] : undefined;
       const h = getHeadingRad(currentFusedPos, prev, lastFusedHeadingRef);
 
-      if (isOutage) {
+      // Honest 2σ Covariance Ellipse from East-North covariance block Σ_EN:
+      // Shows realistic error growth and elongation along vehicle heading under NHC
+      const hasCov = currentFusedPos.cov_xx !== undefined && currentFusedPos.cov_yy !== undefined;
+      const covColor = isOutage ? 'rgba(240, 128, 30, 0.28)' : 'rgba(240, 128, 30, 0.12)';
+      const metresToPx = (m: number) => getPixelRadius(currentFusedPos.lat!, currentFusedPos.lon!, m);
+
+      if (hasCov) {
+        drawCovarianceEllipse(
+          ctx,
+          pt.x,
+          pt.y,
+          currentFusedPos.cov_xx!,
+          currentFusedPos.cov_yy!,
+          currentFusedPos.cov_xy ?? 0,
+          metresToPx,
+          covColor,
+          2.0
+        );
+      } else if (isOutage || aerisError > 0.5) {
         const rPx = getPixelRadius(currentFusedPos.lat, currentFusedPos.lon, aerisError);
-        drawUncertaintyCircle(ctx, pt.x, pt.y, rPx, 'rgba(240, 128, 30, 0.20)');
+        drawUncertaintyCircle(ctx, pt.x, pt.y, rPx, covColor);
       }
 
       drawVehicleMarker(

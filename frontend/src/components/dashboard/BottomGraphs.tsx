@@ -6,13 +6,13 @@ import { useDashboardContext } from '../../context/DashboardContext';
 export const BottomGraphs: React.FC = () => {
   const { gt, gnss, fused, smoothed, currentIndex } = useTrajectoryData();
   const { isOutage, aerisError, gnssError, currentVelocity, confidence } = useGNSSStatus();
-  const { progress, layers } = useDashboardContext();
+  const { progress, layers, outageStartSec, outageEndSec } = useDashboardContext();
 
   if (!gt.length || !gnss.length || !fused.length) return null;
 
   const N = gnss.length;
-  const OS = OUTAGE_START;
-  const OE = OUTAGE_END;
+  const OS = (outageStartSec ?? 200) / 681.1;
+  const OE = (outageEndSec ?? 260) / 681.1;
 
   // ── 1. Position Error Data ──────────────────────────────────────
   const errPts = gnss.map((p, i) => Math.sqrt((p.x - gt[i].x)**2 + (p.y - gt[i].y)**2));

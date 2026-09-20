@@ -312,5 +312,29 @@ Same order of magnitude, not identical (expected/good). "Not cherry-picked" evid
   - Upgraded Problem, Solution, and How It Works modules with technical specification modal and authentic instrument preview bezel.
 - **Verification:** Vite build passes in 904ms (`✓ built in 904ms`). Comprehensive browser subagent audit verified all flows (`ui_ux_devs_audit_1788443338429.webp`). All changes committed and pushed to `origin/main`.
 
+---
+
+## 2026-09-19 — Mathematical Dead-Reckoning & 60s Outage Audit (S3b & S1 Generalization Run)
+
+**Did:**
+- **Audited mathematical dead-reckoning equations and sensor tracking during 60s outage:**
+  - Evaluated the 4-mode ablation on S3b during the headline 60s outage ($t = 200\text{s} - 260\text{s}$):
+    - `ins_only`: Mean **6,973.1 m** | Max **7,935.0 m** (confirms cubic error growth $\delta p \sim \frac{1}{6} g \delta\theta_0 t^3$)
+    - `ins_gnss`: Mean **87.7 m** | Max **165.8 m** (drifts laterally during outage without NHC)
+    - `ins_nhc`: Mean **413.4 m** | Max **547.0 m** (no GNSS for entire 11 min; bounded by NHC)
+    - `full` (Real-Time EKF): Mean **41.6 m** | Max **122.9 m** (99.4% drift reduction vs pure INS)
+    - `full + RTS` (Smoothed): Mean **20.2 m** | Max **60.5 m** (99.7% drift reduction vs pure INS)
+  - Verified cornering physics: the $90^\circ$ turn at $t=230\text{s}-245\text{s}$ is tracked via quaternion attitude integration $\mathbf{q}_{k+1} = \mathbf{q}_k \otimes \exp(\frac{1}{2}\boldsymbol{\omega}\Delta t)$ and 10 Hz Non-Holonomic Constraints ($\mathbf{v}^b \approx [v_{\text{forward}}, 0, 0]^T$), preventing tangent overshoot.
+- **Executed S1 Unseen Validation Run (`python backend/rts_evaluation.py --s1`, run once per protocol):**
+  - Evaluated on the 86-minute motorway sequence S1 (51,745 steps):
+    - S1 Baseline Overall: Mean **27.4 m**, P95 **45.1 m**
+    - S1 RTS+ZARU Overall: Mean **16.1 m**, P95 **19.7 m** (69.1% error reduction from earlier 51.5m / 90.3% from original 166.5m baseline)
+    - Generalization confirmed: S3b development mean **21.4 m** vs S1 unseen mean **16.1 m**.
+- Filed complete mathematical derivation and error dynamics breakdown in `math_dead_reckoning_audit.md`.
+
+**Decided:**
+- Mathematical dead-reckoning equations and sensor fusion parameters are locked and validated across both short urban drives (S3b) and long motorway drives (S1).
+
+
 
 

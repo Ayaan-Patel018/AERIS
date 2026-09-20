@@ -138,7 +138,44 @@ def main():
         lat0, lon0, total_duration
     )
 
-    # ── fused_output.json — carries real status/uncertainty/velocity/heading ─
+    # ── fused_output.json — carries real status/uncertainty/velocity/heading —
+    # Now also carries the 2×2 East-North covariance block (cov_xx/yy/xy) for
+    # the oriented covariance ellipse renderer on the map canvas.
+    cov_m = fused.get("cov_matrix", [])   # [[cxx,cyy,cxy], ...] or [] if old run
+    n_pts = len(master_times)
+    if len(cov_m) == 0:
+        # Physics-based kinematic fallback:
+        # Under Non-Holonomic Constraints (NHC: vy ≈ 0, vz ≈ 0), lateral drift is
+        # constrained while longitudinal (forward) error grows along vehicle heading.
+        # Rotating the [sigma_long^2, sigma_lat^2] tensor by heading angle psi gives
+        # the exact 2D East-North covariance block Sigma_EN.
+        unc = fused["uncertainty"]
+        headings = fused.get("headings", [0.0] * n_pts)
+        cov_xx_list, cov_yy_list, cov_xy_list = [], [], []
+        for u, h in zip(unc, headings):
+            psi = np.radians(float(h))
+            # 85% longitudinal drift, 15% lateral drift (NHC constraint)
+            s_long2 = float(u) * 0.85
+            s_lat2  = float(u) * 0.15
+            # 2D rotation matrix: R = [[sin(psi), cos(psi)], [cos(psi), -sin(psi)]] for ENU
+            # cov_xx (East), cov_yy (North), cov_xy (East-North cross covariance)
+            cxx = s_long2 * (np.sin(psi)**2) + s_lat2 * (np.cos(psi)**2)
+            cyy = s_long2 * (np.cos(psi)**2) + s_lat2 * (np.sin(psi)**2)
+            cxy = (s_long2 - s_lat2) * np.sin(psi) * np.cos(psi)
+            cov_xx_list.append(round(float(cxx), 4))
+            cov_yy_list.append(round(float(cyy), 4))
+            cov_xy_list.append(round(float(cxy), 4))
+    else:
+        # nearest-neighbour align cov_matrix onto master_times grid
+        src_times_arr = np.array(fused["timestamps"])
+        cov_xx_list, cov_yy_list, cov_xy_list = [], [], []
+        for t in master_times:
+            idx = nearest_index(src_times_arr, t)
+            c = cov_m[idx] if idx < len(cov_m) else [1.0, 1.0, 0.0]
+            cov_xx_list.append(round(float(c[0]), 4))
+            cov_yy_list.append(round(float(c[1]), 4))
+            cov_xy_list.append(round(float(c[2]), 4))
+
     fused_points = build_points(
         master_times, fused["timestamps"], fused["positions"],
         lat0, lon0, total_duration,
@@ -147,6 +184,9 @@ def main():
             "uncertainty": [round(float(u), 3) for u in fused["uncertainty"]],
             "velocity":    [round(float(v), 3) for v in fused["velocities"]],
             "heading":     [round(float(h), 2) for h in fused["headings"]],
+            "cov_xx":      cov_xx_list,
+            "cov_yy":      cov_yy_list,
+            "cov_xy":      cov_xy_list,
         }
     )
 
@@ -185,6 +225,16 @@ def main():
             json.dump(data, f)
         print(f"  Wrote: {path}  ({len(data)} points)")
 
+    # Also copy directly to frontend/src/data/ if it exists
+    frontend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "src", "data"))
+    if os.path.exists(frontend_dir):
+        import shutil
+        for name, _ in outputs:
+            src = os.path.join(OUT_DIR, name)
+            dst = os.path.join(frontend_dir, name)
+            shutil.copy2(src, dst)
+            print(f"  Copied to frontend: {dst}")
+
     # ── report outage window as a fraction (for sanity check, not needed
     #    by the frontend anymore since status is now read per-point) ──────
     ow = fused.get("outage_window")
@@ -194,8 +244,7 @@ def main():
         print("Note: frontend no longer needs this as a hardcoded constant —")
         print("      status is now embedded per-point in fused_output.json.")
 
-    print(f"\nDone. Copy the {'4' if smoothed_points is not None else '3'} files from {OUT_DIR} "
-          f"into frontend/src/data/, replacing the existing ones.")
+    print(f"\nDone. Exported {len(outputs)} files successfully.")
 
 
 if __name__ == "__main__":

@@ -2087,25 +2087,92 @@ h2.sec-title {
   top: 0;
   bottom: 0;
   background: repeating-linear-gradient(-45deg,
-      rgba(229, 72, 77, 0.2),
-      rgba(229, 72, 77, 0.2) 6px,
-      rgba(229, 72, 77, 0.35) 6px,
-      rgba(229, 72, 77, 0.35) 12px);
-  border-left: 1px solid #E5484D;
-  border-right: 1px solid #E5484D;
+      rgba(229, 72, 77, 0.22),
+      rgba(229, 72, 77, 0.22) 6px,
+      rgba(229, 72, 77, 0.38) 6px,
+      rgba(229, 72, 77, 0.38) 12px);
+  border-left: 2px solid #E5484D;
+  border-right: 2px solid #E5484D;
   display: flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  transition: box-shadow 0.15s ease;
+  z-index: 5;
+}
+
+.tl-out:active {
+  cursor: grabbing;
+}
+
+.tl-out:hover {
+  box-shadow: 0 0 12px rgba(229, 72, 77, 0.4);
+}
+
+.tl-out.recomputing {
+  background: repeating-linear-gradient(-45deg,
+      rgba(240, 128, 30, 0.3),
+      rgba(240, 128, 30, 0.3) 6px,
+      rgba(240, 128, 30, 0.5) 6px,
+      rgba(240, 128, 30, 0.5) 12px);
+  border-color: #F0801E;
+  animation: pulseRecompute 1.2s infinite ease-in-out;
+}
+
+@keyframes pulseRecompute {
+  0% { opacity: 0.7; }
+  50% { opacity: 1.0; }
+  100% { opacity: 0.7; }
+}
+
+.tl-out-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  cursor: ew-resize;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tl-out-handle-left {
+  left: -5px;
+}
+
+.tl-out-handle-right {
+  right: -5px;
+}
+
+.tl-out-handle::after {
+  content: '';
+  width: 3px;
+  height: 14px;
+  background: #E5484D;
+  border-radius: 2px;
+  box-shadow: 0 0 5px rgba(229, 72, 77, 0.9);
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.tl-out-handle:hover::after {
+  transform: scaleY(1.3);
+  background: #FF6E70;
 }
 
 .tl-out-label {
   font-size: 8px;
   font-family: var(--f-m);
   font-weight: 700;
-  color: #E5484D;
+  color: #FFF;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  background: rgba(229, 72, 77, 0.75);
+  padding: 1px 6px;
+  border-radius: 3px;
   letter-spacing: 0.08em;
-  opacity: 0.9;
+  pointer-events: none;
   white-space: nowrap;
 }
 
@@ -3082,4 +3149,13 @@ h2.sec-title {
   font-size: 11px;
   font-family: var(--f-m);
   color: var(--muted);
+}
+
+.spin-anim {
+  animation: spinKeyframe 1s linear infinite;
+}
+
+@keyframes spinKeyframe {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
