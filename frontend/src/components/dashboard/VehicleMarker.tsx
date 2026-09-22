@@ -6,8 +6,7 @@ export const drawVehicleMarker = (
   color: string,
   label?: string,
   isOutage: boolean = false,
-  showHalo: boolean = true,
-  badgeOffset?: { dx: number; dy: number }
+  showHalo: boolean = true
 ) => {
   ctx.save();
 
@@ -86,8 +85,8 @@ export const drawVehicleMarker = (
     const textMetrics = ctx.measureText(tagText);
     const tagW = textMetrics.width + tagPadding * 2;
     const tagH = 14;
-    const tagX = x + (badgeOffset?.dx ?? 16);
-    const tagY = y + (badgeOffset?.dy ?? -18);
+    const tagX = x + 16;
+    const tagY = y - 18;
 
     // Badge background box
     ctx.fillStyle = '#08080C';

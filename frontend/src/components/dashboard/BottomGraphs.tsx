@@ -4,43 +4,33 @@ import { useGNSSStatus, OUTAGE_START, OUTAGE_END } from '../../hooks/useGNSSStat
 import { useDashboardContext } from '../../context/DashboardContext';
 
 export const BottomGraphs: React.FC = () => {
-  const { gt, gnss, fused, smoothed, currentIndex } = useTrajectoryData();
+  const { gt, gnss, fused, currentIndex } = useTrajectoryData();
   const { isOutage, aerisError, gnssError, currentVelocity, confidence } = useGNSSStatus();
-  const { progress, layers, outageStartSec, outageEndSec } = useDashboardContext();
+  const { progress } = useDashboardContext();
 
   if (!gt.length || !gnss.length || !fused.length) return null;
 
   const N = gnss.length;
-  const OS = (outageStartSec ?? 200) / 681.1;
-  const OE = (outageEndSec ?? 260) / 681.1;
+  const OS = OUTAGE_START;
+  const OE = OUTAGE_END;
 
   // ── 1. Position Error Data ──────────────────────────────────────
   const errPts = gnss.map((p, i) => Math.sqrt((p.x - gt[i].x)**2 + (p.y - gt[i].y)**2));
   const fusedErrPts = fused.map((p, i) => Math.sqrt((p.x - gt[i].x)**2 + (p.y - gt[i].y)**2));
-  const smoothedErrPts = (smoothed && smoothed.length)
-    ? smoothed.map((p, i) => Math.sqrt((p.x - gt[i].x)**2 + (p.y - gt[i].y)**2))
-    : [];
-
-  const maxErr = Math.max(
-    ...errPts,
-    ...fusedErrPts,
-    ...(layers.smoothed && smoothedErrPts.length ? smoothedErrPts : []),
-    1
-  );
+  const maxErr = Math.max(...errPts, 1);
 
   const pts2path = (vals: number[], mx: number, width = 300, height = 65) => {
     return vals.map((v, i) => {
       const x = (i / (vals.length - 1) * width).toFixed(1);
       const safeV = isNaN(v) ? 0 : v;
       const safeMx = isNaN(mx) || mx === 0 ? 1 : mx;
-      const y = Math.max(4, Math.min(height - 2, height - (safeV / safeMx) * (height - 12))).toFixed(1);
+      const y = (height - (safeV / safeMx) * (height - 10)).toFixed(1);
       return `${x},${y}`;
     }).join(' ');
   };
 
   const pathGnssErr = pts2path(errPts, maxErr);
   const pathFusedErr = pts2path(fusedErrPts, maxErr);
-  const pathSmoothedErr = smoothedErrPts.length ? pts2path(smoothedErrPts, maxErr) : '';
 
   // ── 2. Velocity Data ────────────────────────────────────────────
   const velPts = fused.map((p) => (p.velocity ?? 0) * 3.6);
@@ -61,15 +51,13 @@ export const BottomGraphs: React.FC = () => {
 
   const pathFusedVel = pts2path(velPts, maxVel);
 
+
+
   const playheadX = (progress * 300).toFixed(1);
 
   // Current values
   const curGnssErrStr = `${gnssError.toFixed(2)} m`;
   const curFusedErrStr = `${aerisError.toFixed(2)} m`;
-  const curSmoothedErr = (smoothed && smoothed[currentIndex] && gt[currentIndex])
-    ? Math.hypot(smoothed[currentIndex].x - gt[currentIndex].x, smoothed[currentIndex].y - gt[currentIndex].y)
-    : 0;
-  const curSmoothedErrStr = `${curSmoothedErr.toFixed(2)} m`;
   const curVelStr = `${currentVelocity.toFixed(1)} km/h`;
 
   return (
@@ -83,19 +71,11 @@ export const BottomGraphs: React.FC = () => {
             <span className="graph-legend">
               <span className="leg-dot cyan"></span> GNSS RAW
               <span className="leg-dot orange"></span> AERIS ES-EKF
-              {layers.smoothed && (
-                <>
-                  <span className="leg-dot purple" style={{ background: '#A855F7' }}></span> RTS
-                </>
-              )}
             </span>
           </div>
           <div className="graph-current-stats">
             <span className="stat-item cyan">RAW: <strong>{curGnssErrStr}</strong></span>
             <span className="stat-item orange">EKF: <strong>{curFusedErrStr}</strong></span>
-            {layers.smoothed && (
-              <span className="stat-item purple" style={{ color: '#A855F7' }}>RTS: <strong>{curSmoothedErrStr}</strong></span>
-            )}
           </div>
         </div>
 
@@ -120,9 +100,6 @@ export const BottomGraphs: React.FC = () => {
           {/* Curves */}
           <polyline points={pathGnssErr} fill="none" stroke="#2DD4BF" strokeWidth="1.2" opacity="0.7" />
           <polyline points={pathFusedErr} fill="none" stroke="#F0801E" strokeWidth="1.8" />
-          {layers.smoothed && pathSmoothedErr && (
-            <polyline points={pathSmoothedErr} fill="none" stroke="#A855F7" strokeWidth="1.6" />
-          )}
 
           {/* Vertical Playhead Sweep Line */}
           <line x1={playheadX} y1="0" x2={playheadX} y2="75" stroke="#FFFFFF" strokeWidth="1" strokeDasharray="2,2" opacity="0.7" />
