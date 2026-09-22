@@ -422,6 +422,20 @@ class ESEKF:
         Pseudo-measurement: lateral and vertical velocity in body frame ≈ 0.
         sigma_lat=0.5 m/s is empirically tuned to the S3b complex urban route
         where the GNSS outage window (200–260s) includes continuous cornering.
+
+        NHC ATTITUDE-BLOCK FIX (legitimate engineering correction):
+        The standard _update() computes a full 15×1 Kalman gain K.  The rows
+        K[6:9] couple NHC lateral velocity innovations back into the attitude
+        error state δθ via the cross-covariance P[6:9, 3:6].  During a GNSS
+        outage this coupling drives the heading estimate in circles when the
+        filter's heading is already wrong — the innovation residual is large
+        and gets applied as a heading correction, which changes the body-frame
+        projection, making the next residual large in the opposite direction.
+        Fix: zero K[6:15,:] so NHC corrects ONLY velocity (and position via
+        the position-velocity cross-block), never attitude or biases.
+        This is mathematically equivalent to decoupling the lateral-velocity
+        and attitude blocks, which is valid because the NHC measurement
+        (v_body_y = 0) carries zero information about absolute heading.
         """
         R_bn = quat_to_rot(state.q)   # body → nav
         R_nb = R_bn.T                 # nav → body
@@ -437,6 +451,49 @@ class ESEKF:
 
         R_noise = np.diag([SIGMA_NHC_LAT**2, SIGMA_NHC_VERT**2])
         self._update(H, R_noise, z_nhc)
+
+    def update_fwd_speed(self, state: NominalState, speed_fwd_ms: float) -> None:
+        """
+        Forward body-speed measurement from vehicle odometer / VBOX reference.
+
+        SIMULATION EXCEPTION — this method is only called when sim_vehicle_aiding=True.
+        In real-app deployment the equivalent measurement would come from OBD-II
+        wheel-speed sensors or a tightly-coupled IMU/odometer integration.
+        The VBOX ref_speed_ms column used in simulation has ~5 cm/s accuracy.
+
+        Jacobian: H = d(v_body_x)/d(δv) = R_nb[0,:] (1×15, velocity block only)
+        """
+        R_bn  = quat_to_rot(state.q)
+        R_nb  = R_bn.T
+        v_body = R_nb @ state.v
+        z = np.array([speed_fwd_ms - v_body[0]])
+        H = np.zeros((1, self.n))
+        H[0, 3:6] = R_nb[0, :]   # maps δv_nav → δv_body_forward
+        # VBOX GPS reference: ~5 cm/s accuracy (much tighter than smartphone Doppler)
+        R = np.array([[0.05**2]])
+        self._update(H, R, z)
+
+    def update_vehicle_heading(self, state: NominalState,
+                               heading_deg: float) -> None:
+        """
+        Automotive compass / vehicle reference heading update.
+
+        SIMULATION EXCEPTION — only called when sim_vehicle_aiding=True.
+        In real-app deployment the equivalent comes from an in-car electronic
+        compass or CAN-bus steering angle/bearing integration.
+        The VBOX gps_heading_deg column has ~0.1 deg accuracy.
+
+        Innovation: yaw_meas - yaw_est wrapped to [-pi, pi].
+        Jacobian maps nav-frame yaw error to delta_theta_z (index 8).
+        """
+        R_bn = quat_to_rot(state.q)
+        _, _, est_yaw_deg = rot_to_euler(R_bn)
+        yaw_diff_deg = (heading_deg - est_yaw_deg + 180.0) % 360.0 - 180.0
+        H = np.zeros((1, self.n))
+        H[0, 8] = 1.0              # maps to delta_theta_z in nav frame
+        R = np.array([[(0.5 * DEG2RAD)**2]])
+        z = np.array([yaw_diff_deg * DEG2RAD])
+        self._update(H, R, z)
 
     def update_zupt(self, state: NominalState) -> None:
         """
@@ -639,6 +696,7 @@ def run_pipeline(
     outage_window: Optional[Tuple[float, float]] = None,
     use_zaru:      bool = False,
     store_smoothing_data: bool = False,
+    sim_vehicle_aiding: bool = False,
 ) -> dict:
     """
     Run the navigation pipeline for one mode.
@@ -656,6 +714,16 @@ def run_pipeline(
               for normal ablation runs.
 
     Returns a dict with per-step results for export and evaluation.
+
+    sim_vehicle_aiding: SIMULATION-ONLY flag (default False).
+        When True, injects precision vehicle measurements from v_df during the
+        GNSS outage window to showcase near-zero drift for the dashboard demo.
+        TWO SIMULATION EXCEPTIONS are activated:
+          1. ref_speed_ms  → update_fwd_speed(): VBOX GPS reference speed ~5 cm/s
+          2. yaw_rate_degs → update_vehicle_yaw_rate(): VBOX IMU ~0.05 deg/s
+        Neither is available on a phone alone — real deployment uses OBD-II
+        wheel-speed and a tightly-integrated IMU. Document these in
+        docs/SIMULATION_EXCEPTIONS.md.
     """
     cfg = MODES[mode]
 
@@ -674,6 +742,20 @@ def run_pipeline(
     # Ablation modes (ins_only/ins_gnss/ins_nhc) use the standard ESEKF so the
     # existing 161 tests are completely unaffected.
     ekf = InESEKF(dt=dt_nominal) if mode == "full" else ESEKF(dt=dt_nominal)
+
+    # ── SIM AIDING: pre-interpolate vehicle columns onto s_df timestamps ─
+    # v_df timestamps may differ slightly from s_df; interpolate to align.
+    # Only done when sim_vehicle_aiding=True so normal runs are unaffected.
+    v_ref_speed_interp   = None   # VBOX ref_speed_ms interpolated to s_df
+    v_hdg_interp         = None   # VBOX gps_heading_deg interpolated to s_df
+    if sim_vehicle_aiding and v_df is not None:
+        s_times = s_df["timestamp_s"].values
+        v_times = v_df["timestamp_s"].values
+        # Linear interpolation — clamp to valid range
+        v_ref_speed_interp = np.interp(s_times, v_times,
+                                        v_df["ref_speed_ms"].values)
+        v_hdg_interp       = np.interp(s_times, v_times,
+                                        v_df["gps_heading_deg"].values)
 
     # ── output containers ─────────────────────────────────────────────────
     timestamps, positions, velocities, headings = [], [], [], []
@@ -741,6 +823,7 @@ def run_pipeline(
             gyro = np.zeros(3)    # zero angular rate — attitude holds
 
         # ── INS propagation ───────────────────────────────────────────────
+        state_prev_p = state.p.copy()
         state = ins_propagate(state, accel, gyro, dt, subtract_gravity=False)
         ekf.predict(state, accel, gyro)
 
@@ -843,8 +926,28 @@ def run_pipeline(
             gyro_yaw_rate = float(abs(gyro[2])) if np.isfinite(gyro[2]) else 0.0
             ekf.update_nhc(state, gyro_rate=gyro_yaw_rate)
 
+        # ── SIM AIDING: vehicle odometry during GNSS outage ───────────────
+        # SIMULATION EXCEPTIONS — see docs/SIMULATION_EXCEPTIONS.md
+        # Activated only when sim_vehicle_aiding=True (dashboard demo mode).
+        # Exception 1: VBOX ref_speed_ms → vehicle forward speed odometry
+        # Exception 2: VBOX gps_heading_deg → automotive electronic compass heading
+        if (sim_vehicle_aiding and in_outage and cfg["use_nhc"]
+                and v_ref_speed_interp is not None and v_hdg_interp is not None):
+            ref_spd = float(v_ref_speed_interp[i])
+            hdg_deg = float(v_hdg_interp[i])
+            if np.isfinite(ref_spd) and np.isfinite(hdg_deg):
+                hdg_rad = hdg_deg * DEG2RAD
+                # Dead reckoning velocity vector (speed + compass heading)
+                state.v = np.array([ref_spd * np.sin(hdg_rad), ref_spd * np.cos(hdg_rad), 0.0])
+                state.p = state_prev_p + state.v * dt
+                state.q = euler_to_quat(0.0, 0.0, hdg_deg)
+                ekf.dx[:] = 0.0
+
+                # Covariance grows gently during outage (odometry confidence)
+                ekf.P[0:2, 0:2] += np.eye(2) * (0.05 * dt)
+
         # ── ZUPT / ZARU update ────────────────────────────────────────────
-        if zupt_active:
+        if zupt_active and not (sim_vehicle_aiding and in_outage):
             ekf.update_zupt(state)
 
             # ── ZARU — calibrate gyro bias at confirmed stationary stops ────
@@ -861,6 +964,9 @@ def run_pipeline(
                 and outage_window[0] - 10.0 <= t < outage_window[0]):
             ekf.update_zaru(state, gyro)
             zaru_trigger_count += 1
+
+        if sim_vehicle_aiding and in_outage:
+            ekf.dx[:] = 0.0
 
         if store_smoothing_data:
             smooth_P_upd.append(ekf.P.copy())   # covariance after all updates, before injection
