@@ -161,7 +161,13 @@ class TestEKFErrorState(unittest.TestCase):
                                    err_msg="dx must be zero after inject_corrections")
 
     def test_gnss_position_update_sets_position_correction(self):
-        """GNSS position update must move position error state dx[0:3]."""
+        """GNSS position update must move position error state dx[0:3].
+
+        Uses a 1 m innovation — small enough to pass the Mahalanobis outlier gate
+        (chi-sq < 25) at the initial P ≈ 0.1 operating point. Large innovations
+        such as 10 m are correctly rejected by the gate when the filter is confident
+        (P small) — that is the intended real-world safety behaviour.
+        """
         ekf = _make_ekf()
         state = _level_state()
 
@@ -170,7 +176,8 @@ class TestEKFErrorState(unittest.TestCase):
             ekf.predict(state, accel_body=np.zeros(3), gyro_body=np.zeros(3))
 
         dx_pos_before = ekf.dx[0:3].copy()
-        gps_enu = np.array([10.0, 5.0, 0.0])   # GPS says we're 10 m East, 5 m North
+        # 1 m innovation: within gate (maha_sq ≈ 1/(0.1+4) ≈ 0.24 << 25)
+        gps_enu = np.array([1.0, 0.5, 0.0])
         ekf.update_gnss_position(state, gps_enu=gps_enu)
 
         # dx[0:3] should now be non-zero (correction applied)
