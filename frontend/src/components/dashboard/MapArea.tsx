@@ -5,7 +5,7 @@ import { useTrajectoryData, type TrajectoryPoint } from '../../hooks/useTrajecto
 import { useGNSSStatus } from '../../hooks/useGNSSStatus';
 import { drawTrajectory } from './TrajectoryLayer';
 import { drawVehicleMarker } from './VehicleMarker';
-import { drawUncertaintyCircle } from './UncertaintyCircle';
+import { drawUncertaintyCircle, drawCovarianceEllipse } from './UncertaintyCircle';
 
 type TileStyle = 'dark' | 'streets' | 'satellite';
 
@@ -199,8 +199,8 @@ export const MapArea: React.FC = () => {
         }
       }
       if (fusedPixels.length > 1) {
-        // Blended line (Teal outside outage, Orange during outage)
-        drawTrajectory(ctx, fusedPixels, isOutage ? '#F0801E' : '#2DD4BF', isOutage ? 3.0 : 2.4, false);
+        // AERIS ES-EKF Traveled Path: Signature Orange (#F0801E) for immediate identification
+        drawTrajectory(ctx, fusedPixels, '#F0801E', isOutage ? 3.0 : 2.6, false);
       }
     }
 
@@ -222,7 +222,7 @@ export const MapArea: React.FC = () => {
     const activeCount =
       (layers.gnss ? 1 : 0) + (layers.fused ? 1 : 0) + (layers.smoothed ? 1 : 0);
 
-    // ── 5A. Render GNSS Raw Vehicle Arrow ────────────────────────
+    // ── 5A. Render GNSS Raw Vehicle Arrow (Cyan #2DD4BF / Red #E5484D) ───────
     if (layers.gnss && currentGnssPos && currentGnssPos.status !== 'unavailable' && currentGnssPos.lat !== undefined && currentGnssPos.lon !== undefined) {
       const pt = toPixel(currentGnssPos.lat, currentGnssPos.lon);
       const prev = currentIndex > 0 ? gnss[currentIndex - 1] : undefined;
@@ -242,11 +242,12 @@ export const MapArea: React.FC = () => {
         gnssColor,
         activeCount > 1 ? 'GNSS' : undefined,
         isOutage,
-        !layers.fused && !layers.smoothed // Halo only if primary
+        !layers.fused && !layers.smoothed, // Halo only if primary
+        { dx: -44, dy: -20 }               // Placed top-left to avoid overlap
       );
     }
 
-    // ── 5B. Render RTS Smoothed Vehicle Arrow ───────────────────
+    // ── 5B. Render RTS Smoothed Vehicle Arrow (Purple #A855F7) ──
     if (layers.smoothed && currentSmoothedPos && currentSmoothedPos.lat !== undefined && currentSmoothedPos.lon !== undefined) {
       const pt = toPixel(currentSmoothedPos.lat, currentSmoothedPos.lon);
       const prev = currentIndex > 0 ? smoothed[currentIndex - 1] : undefined;
@@ -260,20 +261,38 @@ export const MapArea: React.FC = () => {
         '#A855F7',
         activeCount > 1 ? 'RTS' : undefined,
         false,
-        !layers.fused // Halo if fused is off
+        !layers.fused,                      // Halo if fused is off
+        { dx: 18, dy: 10 }                  // Placed bottom-right to avoid overlap
       );
     }
 
-    // ── 5C. Render AERIS ES-EKF Vehicle Arrow (Primary Solution) ─
+    // ── 5C. Render AERIS ES-EKF Vehicle Arrow (Signature Orange #F0801E) ─
     if (layers.fused && currentFusedPos && currentFusedPos.lat !== undefined && currentFusedPos.lon !== undefined) {
       const pt = toPixel(currentFusedPos.lat, currentFusedPos.lon);
       const prev = currentIndex > 0 ? fused[currentIndex - 1] : undefined;
       const h = getHeadingRad(currentFusedPos, prev, lastFusedHeadingRef);
-      const fusedColor = isOutage ? '#F0801E' : '#2DD4BF';
 
-      if (isOutage) {
+      // Honest 2σ Covariance Ellipse from East-North covariance block Σ_EN:
+      // Shows realistic error growth and elongation along vehicle heading under NHC
+      const hasCov = currentFusedPos.cov_xx !== undefined && currentFusedPos.cov_yy !== undefined;
+      const covColor = isOutage ? 'rgba(240, 128, 30, 0.28)' : 'rgba(240, 128, 30, 0.12)';
+      const metresToPx = (m: number) => getPixelRadius(currentFusedPos.lat!, currentFusedPos.lon!, m);
+
+      if (hasCov) {
+        drawCovarianceEllipse(
+          ctx,
+          pt.x,
+          pt.y,
+          currentFusedPos.cov_xx!,
+          currentFusedPos.cov_yy!,
+          currentFusedPos.cov_xy ?? 0,
+          metresToPx,
+          covColor,
+          2.0
+        );
+      } else if (isOutage || aerisError > 0.5) {
         const rPx = getPixelRadius(currentFusedPos.lat, currentFusedPos.lon, aerisError);
-        drawUncertaintyCircle(ctx, pt.x, pt.y, rPx, 'rgba(240, 128, 30, 0.20)');
+        drawUncertaintyCircle(ctx, pt.x, pt.y, rPx, covColor);
       }
 
       drawVehicleMarker(
@@ -281,10 +300,11 @@ export const MapArea: React.FC = () => {
         pt.x,
         pt.y,
         h,
-        fusedColor,
+        '#F0801E',                          // Signature AERIS Orange
         activeCount > 1 ? 'ES-EKF' : undefined,
         isOutage,
-        true // Always prominent halo
+        true,                               // Always prominent halo
+        { dx: 18, dy: -20 }                 // Placed top-right
       );
     }
   }, [gt, gnss, fused, smoothed, currentIndex, currentGnssPos, currentFusedPos, currentSmoothedPos, layers, isOutage, aerisError, gnssError]);

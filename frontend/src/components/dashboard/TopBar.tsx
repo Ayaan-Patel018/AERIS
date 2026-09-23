@@ -55,6 +55,10 @@ export const TopBar: React.FC = () => {
           <Users size={13} />
           <span>DEVS</span>
         </button>
+        <div className="top-brand-wrap">
+          <img src={aerisLogo} alt="AERIS" className="top-brand-logo" />
+          <span className="top-sub-tag">15-STATE ES-EKF</span>
+        </div>
       </div>
 
       <div className="top-center">
