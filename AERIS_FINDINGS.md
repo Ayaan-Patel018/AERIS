@@ -290,3 +290,38 @@ S1 n=429: 11.29 / 358.43, hold 81.79, cv 26.34. Truth inside 1σ: 0.0 % on both 
 0.2 m shipped, 2.5 m / 1.7 m fixes-only vs errors of 100+ m).
 Reading: with honest GNSS use the ESEKF is 3–13× worse than doing nothing clever (last-fix + const-v) — consistent with the
 A4 finding. The S1 ESEKF numbers above are the frozen reference; no tuning was done on S1.
+
+
+## B2 — mounting angle φ (phone horizontal frame → vehicle forward), calibration on t ≤ 200 s, phone data only
+`backend/mount_angle.py` (reused by vehicle_dr later). φ = angle of the vehicle's forward axis from phone +x toward +y.
+Criterion (i): ∫a_fwd over each new-fix interval vs the phone-GNSS speed change over it. Criterion (ii): a_lat vs v·ω_vert in
+turns (|ω_vert| > 0.1 rad/s, v > 3 m/s; v = GNSS speed interpolated between fixes and 0.5 s smoothing — offline calibration only).
+1° grid; "plateau" = width of the φ range within 0.05 of the peak correlation.
+
+| drive | criterion | n | φ | corr | plateau | slope |
+|---|---|---|---|---|---|---|
+| S3b | (i) ∫a_fwd vs Δspeed | 20 intervals | −180° | +0.208 | 92° | 0.23 |
+| S3b | (ii) a_lat vs v·ω | 564 samples | −9° | +0.120 | 111° | 0.09 |
+| S3b | agreement | | **171° apart** | both weak | | |
+| S1 | (i) ∫a_fwd vs Δspeed | 14 intervals | −80° | +0.891 | 32° | 0.69 |
+| S1 | (ii) a_lat vs v·ω | 306 samples | −51° | +0.932 | 66° | 0.84 |
+| S1 | agreement | | 29° apart (plateaus overlap at −84…−64°) | both strong | | |
+
+**S1: fixed, identifiable mount, φ ≈ −50° … −80°.** Independent checks agree: sign-flipped mean horizontal accel in turns is
+(+1.37, +0.91) m/s² (magnitude 1.64, consistency 0.8–0.93) → lateral-left at +33.6°, forward ≈ −56°. Per-30 s windows in the first
+400 s: 7/8 fit well (corr > 0.8), φ = −6, −72, −91, −46, −55, −86, −38. Whole-drive scan (300 s windows, 5174 s): well-fitting windows
+give circular mean φ = −36.9°, resultant length 0.98 (windows range −20° … −69°; weak fits in 3300–4500 s). So calibrating on the
+first 200 s is representative on S1.
+
+**S3b: there is NO constant mounting angle.** The rotation-invariant check (no φ needed) shows the accelerometer does respond
+to turns (corr(|a_h|, v|ω|) = 0.47; mean |a_h| in turns 2.48 vs v|ω| 2.74 m/s²), but the sign-flipped mean horizontal accel in turns has
+magnitude only 0.29 m/s² (S1: 1.64) — the vectors cancel because their direction relative to the phone changes. Per 30 s windows
+(criterion ii): 9/19 windows fit very well (corr 0.85–0.99) but at φ = 73°, 153°, 144°, −66°, 153°, −115°, −58°, 104°, 96°
+(circular mean +141°, resultant length 0.31 ≈ spread over the circle). Good fits at different angles = the phone's yaw relative to
+the car changes during the drive (pre-200 s windows alone: 98°, −66°, 73°, 154°, −34°). Gyro-vertical still works on S3b (A2: corr 0.67),
+so only the horizontal accel projection is affected.
+
+**Consequence for B3:** a single fixed φ from the first 200 s is valid on S1 but not on S3b (the tuning drive). Forward-acceleration aiding
+(v̇ = a_fwd − b_a) and the centripetal a_lat update both need φ. Heading (ψ̇ = ω_vert − b_g) does not.
+Note on use of S1: the per-window and whole-drive S1 scans above are phone-only calibration-stability checks (no VBOX, no filter
+scoring), run to know whether a first-200 s φ would stay valid; disclosed here.
