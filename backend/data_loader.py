@@ -63,6 +63,50 @@ def _make_timestamp_s(raw_series, unit):
     return timestamp_s
 
 
+def _wallclock_timestamp_s(df):
+    """
+    Seconds since the first row, from the phone's own wall-clock column
+    'DATE (YYYY-MO-DD HH-MI-SS_SSS)'. Returns (timestamp_s Series,
+    time_of_day_at_first_row_s), or (None, None) when the column is missing,
+    unparseable or not monotonic (caller falls back to the counter).
+
+    Why: 'TIME SINCE START (ms)' can roll over mid-file (S3b row 2043:
+    2707.520 s -> 0.008 s). _make_timestamp_s() then has to treat that as a
+    zero step, silently discarding the real time the logger was down — the
+    wall clock jumps +4.428 s at exactly that row (vs 0.1 s normal), and the
+    VBOX reference confirms it (phone data after the rollover matches VBOX
+    +4.25..+4.75 s later). See AERIS_FINDINGS.md (B0).
+    """
+    col = next((c for c in df.columns if str(c).startswith("DATE")), None)
+    if col is None:
+        return None, None
+    t = pd.to_datetime(df[col], format="%Y-%m-%d %H:%M:%S:%f", errors="coerce")
+    if t.isna().any() or not (t.diff().dropna().dt.total_seconds() >= 0).all():
+        return None, None
+    secs = (t - t.iloc[0]).dt.total_seconds()
+    t0 = t.iloc[0]
+    tod = t0.hour * 3600.0 + t0.minute * 60.0 + t0.second + t0.microsecond / 1e6
+    return secs, float(tod)
+
+
+def sv_time_offset(s_df, v_df) -> float:
+    """
+    Seconds to ADD to an S-file timestamp_s to get the same instant on the
+    V-file timestamp_s axis. SCORING ONLY — never an input to AERIS.
+
+    Both devices carry a time of day (phone wall clock; VBOX 'Time Since
+    Start of Day') that agree up to a whole-hour timezone offset, so the
+    relative start offset is (S_start - V_start) taken modulo one hour.
+    Returns 0.0 if either clock is unavailable.
+    """
+    s0 = s_df.attrs.get("wall_clock_start_s")
+    v0 = v_df.attrs.get("clock_start_s")
+    if s0 is None or v0 is None:
+        return 0.0
+    d = float(s0) - float(v0)
+    return d - 3600.0 * round(d / 3600.0)
+
+
 # ── smartphone loader (S-* files) ────────────────────────────────────────────
 def load_smartphone(path: str) -> pd.DataFrame:
     """
@@ -79,7 +123,11 @@ def load_smartphone(path: str) -> pd.DataFrame:
     df.columns = df.columns.str.strip()
 
     # ── timestamp ────────────────────────────────────────────────────────────
-    df["timestamp_s"] = _make_timestamp_s(df["TIME SINCE START (ms)"], unit="ms")
+    wall_s, wall_tod0 = _wallclock_timestamp_s(df)
+    if wall_s is not None:
+        df["timestamp_s"] = wall_s
+    else:   # no usable wall clock — fall back to the (rollover-lossy) counter
+        df["timestamp_s"] = _make_timestamp_s(df["TIME SINCE START (ms)"], unit="ms")
 
     # ── GPS ──────────────────────────────────────────────────────────────────
     df.rename(columns={
@@ -167,7 +215,10 @@ def load_smartphone(path: str) -> pd.DataFrame:
         "mag_x_ut", "mag_y_ut", "mag_z_ut",
         "orient_yaw_deg", "orient_pitch_deg", "orient_roll_deg",
     ]
-    return df[keep].reset_index(drop=True)
+    out = df[keep].reset_index(drop=True)
+    if wall_tod0 is not None:
+        out.attrs["wall_clock_start_s"] = wall_tod0   # time of day at row 0 (see sv_time_offset)
+    return out
 
 
 # ── vehicle/VBOX loader (V-* files) ──────────────────────────────────────────
@@ -235,7 +286,9 @@ def load_vehicle(path: str) -> pd.DataFrame:
         "ws_fl_rads", "ws_fr_rads", "ws_rl_rads", "ws_rr_rads",
         "vbox_col1_raw",
     ]
-    return df[keep].reset_index(drop=True)
+    out = df[keep].reset_index(drop=True)
+    out.attrs["clock_start_s"] = float(df[raw_ts_col].iloc[0])   # time of day at row 0 (see sv_time_offset)
+    return out
 
 
 # ── inspection ───────────────────────────────────────────────────────────────

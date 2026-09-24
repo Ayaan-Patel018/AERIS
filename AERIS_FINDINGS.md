@@ -221,3 +221,50 @@ phone GNSS 5.7 m, truth inside 1σ 0 % (σ at 260 s = 2.4 m). Versus the honest 
 end 159.6 → 145.6 m, pre-outage 17.4 → 12.0 m, |Δyaw| 1118° → 737°. Displacement is still ~5× too short and the
 filter is still wildly over-confident. The pre-outage 12 m is GNSS-following (see A4), not INS quality, and the
 honest causal-GNSS version of this filter fails outright. Recommendation: Phase B (vehicle_dr).
+
+
+# Phase B
+
+## B0 — time-alignment check (found and fixed a real loader bug)
+Phone GNSS vs VBOX position error at every NEW phone fix (74 fixes on S3b, 532 on S1), VBOX interpolated at the
+phone timestamp.
+
+**Before (counter-based timestamp_s):**
+
+| | S3b before reset (<204 s) | S3b after reset (≥204 s) | S3b all | S1 all |
+|---|---|---|---|---|
+| mean error (m) | 5.17 | 25.68 | 19.86 | 2.67 |
+| best time shift (VBOX at t+shift) | +0.25 s (t<180) | **+4.25 … +4.75 s** in every 45 s window after ~200 s | | 0.0 s |
+
+Per-45 s windows on S3b: error 2–9 m up to 180 s, then 20–34 m for all later windows; best shift jumps from 0 to
++4.25 s and stays there (speed-based estimate agrees: +4.25 … +4.75 s, |Δv| 2.0–3.6 → 0.2–0.4 m/s). A step, not a drift.
+
+**Cause.** The raw `TIME SINCE START (ms)` counter rolls over once in S3b (row 2043: 2707.520 s → 0.008 s; loader t=204.2 s);
+S1 has none. `_make_timestamp_s` treats a negative step as 0, silently discarding the real time the phone logger was
+down. The phone's own wall-clock column `DATE (…)` (dropped by the loader) jumps **+4.428 s at exactly row 2043**
+(normal step 0.1 s), so ≈4.33 s of logging is missing. VBOX is continuous. Phone and VBOX share a clock modulo a whole
+hour: S − V start offset = +3600.693 s (S3b) and +3600.546 s (S1); S3b's offset grows by +4.328 s by the end of the
+file, S1's stays constant to 1 ms.
+
+**Fix (data_loader.py).** `timestamp_s` for the phone now comes from the wall-clock column (phone-only; falls back to the
+counter if it is missing/non-monotonic). New `sv_time_offset(s_df, v_df)` = (S start − V start) mod 1 h (+0.693 s S3b,
++0.546 s S1) is used ONLY for scoring; `check_outage.py` now looks up truth at t + offset. S3b duration 681.1 → 685.5 s;
+S1 unchanged (5174.5 s).
+
+**After:** S3b phone-GNSS error vs VBOX mean 5.76 m, median 4.74 m, flat across the drive (per segment 3.1–9.2 m; before
+reset 6.49, after reset 5.47). S1 4.94 m mean (median 4.39). No jumps, no trend.
+Residual, NOT corrected: the best shift is −0.5 s on both drives (S3b 4.16 vs 5.76 m at 0; S1 2.62 vs 4.94 m) — phone
+fixes reflect the position ~0.5 s earlier than the wall-clock alignment says (GNSS latency / clock start offset), ≈4 m at
+8 m/s. Consistent, so it is left as a known scoring bias instead of a VBOX-fitted constant.
+Data hole: the phone has no data for ~4.3 s at S-time ≈ 204 s (the car was stopped there per VBOX). The pipelines'
+`dt > 1 s → dt = 0.1` clamp treats the jump as one nominal step. VBOX ends 4.3 s + 0.7 s before the phone does.
+
+## Phase A final state re-scored on the corrected timeline (ESEKF, S3b, 200–260 s)
+
+| | outage mean | end | max | path (225.7) | disp (154.0) | \|Δyaw\| (675.7) | pre-outage | raw GNSS floor | 1σ | gap @200 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Phase A final, OLD timeline (962b677) | 49.94 | 145.55 | 145.55 | 171.7 / 224.8 | 29.1 / 153.2 | 737 / 663 | 11.97 | 5.67 | 0 % | 4.88 |
+| Phase A final, CORRECTED timeline | 55.02 | 129.56 | 129.56 | 145.4 / 225.7 | 34.0 / 154.0 | 675 / 676 | 13.46 | 7.08 | 0 % | 4.88 |
+
+(The 200–260 s window now spans different phone rows after the hole, and truth is looked up at the aligned VBOX time.
+Numbers before this point in the log are on the old timeline and are not comparable to numbers after it.)

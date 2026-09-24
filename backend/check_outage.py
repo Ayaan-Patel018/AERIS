@@ -13,7 +13,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from data_loader import load_smartphone, load_vehicle, get_dataset_root
+from data_loader import load_smartphone, load_vehicle, get_dataset_root, sv_time_offset
 from ins_ekf import run_pipeline, latlon_to_enu
 
 OUTAGE = (200.0, 260.0)
@@ -28,6 +28,7 @@ def main(drive="S3b"):
                         "Categorised IOVNB Dataset", "S (Driver A)", drive)
     s_df = load_smartphone(os.path.join(base, f"S-{drive}.csv"))
     v_df = load_vehicle(os.path.join(base, f"V-{drive}.csv"))   # scoring only
+    off = sv_time_offset(s_df, v_df)   # S time + off = V time (wall-clock start offset; scoring only)
 
     res = run_pipeline(s_df, None, mode="full", outage_window=OUTAGE)
     lat0, lon0 = res["lat0"], res["lon0"]
@@ -40,8 +41,8 @@ def main(drive="S3b"):
     ref_enu = np.array([latlon_to_enu(la, lo, lat0, lon0)[:2]
                         for la, lo in zip(ref["gps_lat"], ref["gps_lon"])])
     rt = ref["timestamp_s"].values
-    truth = np.column_stack([np.interp(t, rt, ref_enu[:, 0]),
-                             np.interp(t, rt, ref_enu[:, 1])])
+    truth = np.column_stack([np.interp(t + off, rt, ref_enu[:, 0]),
+                             np.interp(t + off, rt, ref_enu[:, 1])])
     err_vec = est - truth
     err = np.linalg.norm(err_vec, axis=1)
 
@@ -50,7 +51,7 @@ def main(drive="S3b"):
 
     # Outage path/displacement: AERIS vs truth
     e_out = est[m_out]
-    rmask = (rt >= OUTAGE[0]) & (rt <= OUTAGE[1])
+    rmask = (rt >= OUTAGE[0] + off) & (rt <= OUTAGE[1] + off)
     r_out = ref_enu[rmask]
     aeris_path, true_path = _path_len(e_out), _path_len(r_out)
     aeris_disp = float(np.linalg.norm(e_out[-1] - e_out[0]))
@@ -88,8 +89,8 @@ def main(drive="S3b"):
     rp = raw[raw["timestamp_s"] >= 20.0]
     rp_enu = np.array([latlon_to_enu(la, lo, lat0, lon0)[:2]
                        for la, lo in zip(rp["gps_lat"], rp["gps_lon"])])
-    rp_truth = np.column_stack([np.interp(rp["timestamp_s"], rt, ref_enu[:, 0]),
-                                np.interp(rp["timestamp_s"], rt, ref_enu[:, 1])])
+    rp_truth = np.column_stack([np.interp(rp["timestamp_s"] + off, rt, ref_enu[:, 0]),
+                                np.interp(rp["timestamp_s"] + off, rt, ref_enu[:, 1])])
     gnss_pre = float(np.linalg.norm(rp_enu - rp_truth, axis=1).mean())
 
     print(f"=== check_outage: {drive}  (v_df=None, outage {OUTAGE[0]:.0f}-{OUTAGE[1]:.0f} s) ===")
