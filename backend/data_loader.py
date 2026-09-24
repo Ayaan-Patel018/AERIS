@@ -90,8 +90,13 @@ def load_smartphone(path: str) -> pd.DataFrame:
         "GPS ORIENTATION (Â°)":      "gps_heading_deg",
     }, inplace=True)
 
-    # GPS speed: km/h → m/s
-    df["gps_speed_ms"] = df["GPS SPEED (Kmh)"] * KMH_TO_MS
+    # GPS speed: the AndroSensor column is headed "(Kmh)" but the values are
+    # ALREADY m/s — do NOT divide by 3.6. Evidence (speed implied by differencing
+    # consecutive NEW fixes, ~9 s apart, vs the reported column, intervals with
+    # reported speed > 1 m/s): median chord/reported = 0.96 on S3b (71 intervals)
+    # and 1.00 on S1 (510 intervals) when read as m/s, but 3.46 / 3.61 when read
+    # as km/h. See AERIS_FINDINGS.md (A1).
+    df["gps_speed_ms"] = df["GPS SPEED (Kmh)"]
 
     # Satellite count: parse "16 / 18" → 16.0
     df["gps_satellites"] = df["GPS SATELLITES IN RANGE"].apply(_parse_satellite_string)

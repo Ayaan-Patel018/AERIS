@@ -78,3 +78,31 @@ the spin (|Δyaw| near truth). But no combination gets the outage anywhere near 
 (finding 3): the heading entering the outage is wrong, the car is stopped 180–212 s so heading is
 unobservable there, and the filter is over-confident. Fixing that is a redesign of the GNSS
 update (feed only real new fixes, causally, with realistic σ), so I am asking before doing it.
+
+## Phase A — make the fixes permanent (S3b, one at a time)
+
+Starting point = a+b+d+e (row "start" below). Columns as in the Step 2 table.
+
+| step | outage mean | end @260 | max | path (225) | disp (153) | \|Δyaw\| (663) | pre-outage | 1σ | gap @200 | verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| start (46b380a) | 62.44 | 198.08 | 198.08 | 174.2 | 41.1 | 466 | 18.21 | 0 % | 2.38 | — |
+| A1 speed already m/s (no /3.6) | 48.92 | 150.42 | 150.42 | 121.6 | 13.0 | 2425 | 11.98 | 0 % | 4.74 | **better; committed** |
+
+### A1 — GPS speed units (proof)
+Speed implied by differencing consecutive NEW fixes (~9 s apart; intervals with reported speed
+> 1 m/s; monotonic loader timestamps) vs the raw "GPS SPEED (Kmh)" column:
+
+| drive | intervals | chord / reported, column read as m/s | read as km/h (/3.6) | corr |
+|---|---|---|---|---|
+| S3b | 71 | 0.961 | 3.460 | 0.83 |
+| S1 | 510 | 1.003 | 3.611 | 0.95 |
+
+The column is m/s despite its header. Chord ≤ path length, so ≲1.0 on curves is expected.
+V-file `Velocity (km/hr)` really is km/h and is unchanged. Result matches the earlier in-memory
+"speed fix only" experiment exactly (48.92 m). Note: raw `TIME SINCE START (ms)` has counter
+resets (raw ends at 477 s; loader's cumulative timestamp gives 681 s) — any diagnostics must use
+`timestamp_s`, not the raw column.
+
+Test suite after A1: 161 run / 161 pass; 37 dataset tests SKIP because `run_tests.py` reports
+IO-VNBD "NOT FOUND" (its dataset detection differs from `get_dataset_root()`), so the tests do
+not exercise the real loader.
