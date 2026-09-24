@@ -243,7 +243,7 @@ def apply_map_matching_to_road(points, gt_points, gnss_points=None, blend_window
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sim-aided", action="store_true", default=True,
+    parser.add_argument("--sim-aided", action="store_true", default=False,
                         help="Export simulation-aided AERIS trajectory (<5m drift) for dashboard demo")
     parser.add_argument("--standard", dest="sim_aided", action="store_false",
                         help="Export standard un-aided AERIS trajectory from exports/evaluation/outage_60s")
