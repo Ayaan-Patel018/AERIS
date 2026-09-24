@@ -974,15 +974,8 @@ def run_pipeline(
                 ekf.update_zaru(state, gyro)
                 zaru_trigger_count += 1
 
-        # FIX-3: Pre-outage ZARU burst — in the 10s window immediately before
-        # the outage starts, force gyro bias calibration on every step regardless
-        # of the standstill FSM.  This maximally freshens the bias estimate so
-        # the filter enters the GNSS blackout with the best possible gyro calibration.
-        # Only active in 'full' mode (uses_nhc=True) and when an outage is configured.
-        if (cfg["use_nhc"] and outage_window is not None
-                and outage_window[0] - 10.0 <= t < outage_window[0]):
-            ekf.update_zaru(state, gyro)
-            zaru_trigger_count += 1
+        # (FIX-3 pre-outage ZARU burst removed: it needed to know in advance
+        # when the outage would start, which a real system cannot.)
 
         if sim_vehicle_aiding and in_outage:
             ekf.dx[:] = 0.0
