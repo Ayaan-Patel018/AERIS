@@ -301,8 +301,9 @@ class ESEKF:
             1.0,  1.0,  1.0,          # δp: ±1 m position uncertainty at start
             0.5,  0.5,  0.5,          # δv: ±0.5 m/s velocity uncertainty
             0.3,  0.3,  1.0,          # δθ: ±17° roll/pitch, ±57° yaw (unknown cold heading)
-            0.1,  0.1,  0.1,          # δba: ±0.1 m/s² accel bias (MEMS typical)
-            0.01, 0.01, 0.01,         # δbg: ±0.01 rad/s gyro bias (MEMS typical)
+            0.1,  0.1,  0.1,          # δba: variance 0.1 (σ≈0.32 m/s²)
+            1e-4, 1e-4, 1e-4,         # δbg: variance 1e-4 → σ = 0.01 rad/s (was 0.01 = σ 0.1 rad/s,
+                                      #      which let the z bias run to −0.53 rad/s ≈ 30°/s)
         ])
         self.dx = np.zeros(self.n)           # error state (always reset after injection)
 

@@ -88,6 +88,7 @@ Starting point = a+b+d+e (row "start" below). Columns as in the Step 2 table.
 | start (46b380a) | 62.44 | 198.08 | 198.08 | 174.2 | 41.1 | 466 | 18.21 | 0 % | 2.38 | — |
 | A1 speed already m/s (no /3.6) | 48.92 | 150.42 | 150.42 | 121.6 | 13.0 | 2425 | 11.98 | 0 % | 4.74 | **better; committed** |
 | A2 gyro z <- 'Pitch' column | 54.96 | 131.06 | 131.06 | 159.0 | 34.1 | 1989 | 11.42 | 0 % | 5.51 | **mixed (mean worse, end/pre/path/disp better); kept — proven axis, prerequisite for A3** |
+| A3a P0[δbg] variance 1e-4 (σ 0.01 rad/s) | 92.55 | 222.62 | 223.23 | 264.5 | 94.5 | 304 | 11.38 | 0 % | 4.97 | **mixed by the rule (mean/end/max worse; disp, spin, bias better); kept — bias now physical, see below** |
 
 ### A1 — GPS speed units (proof)
 Speed implied by differencing consecutive NEW fixes (~9 s apart; intervals with reported speed
@@ -133,3 +134,26 @@ about (+0.71, −0.70) in phone coordinates, not +x. S3b showed no usable signal
 interpolated 9 s GNSS speed is too coarse there). Consequence: the ESEKF's NHC (lateral = body y,
 forward = body x) and its initial-yaw-from-GNSS-course both assume x = forward, which is wrong for this
 data. Phase B is designed to estimate the forward axis from pre-outage data.
+
+### A3a — gyro-bias P0 (evidence for keeping a mean-worse change)
+`P0[δbg]` was 0.01 (a variance → σ 0.1 rad/s) while its comment said ±0.01 rad/s. Set to 1e-4.
+Estimated gyro bias over the S3b run (rad/s), before vs after:
+
+| | z bias at 10 s | z bias 50–259 s | independent stationary-gyro mean (phone only) |
+|---|---|---|---|
+| after A2 only | −0.616 | −0.53 … −0.55, locked (σ 0.0001) | −0.007 … −0.009 |
+| after A3a | −0.006 (t=5) | −0.007 … −0.021 (settles at −0.0085) | −0.007 … −0.009 |
+
+The bias was ~60× too large before (≈ 30°/s of spurious yaw rate compensation). Outage headline
+numbers got worse (mean 55.0 → 92.6 m, end 131 → 223 m) while displacement improved (34 → 94.5 m)
+and total |Δyaw| dropped 1989° → 304° (now below the VBOX figure of 663°, which is inflated by
+low-speed heading noise). Read: the huge bogus bias had been *masking* the real problem; what is left
+is the GNSS model and the heading entering the outage, i.e. A4 / mount offset. Kept as its own commit
+(`git revert` to undo). σ of the z bias collapses to 1e-4 rad/s by t=150 — overconfident, but not
+changed here (one change at a time).
+Observation, not changed: other P0 entries are also variances read as σ in their comments (δθ:
+0.3/0.3/1.0, δba: 0.1).
+
+Disclosure: to see what a standstill looks like I printed the first 60 s of IMU stats for S1 as well as
+S3b (S1: clean rest ~9–47 s, accel var ≈ 0.02; S3b: no rest in the first 60 s, accel var ≥ 0.5). No
+outage score was computed on S1.
