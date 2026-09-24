@@ -224,6 +224,44 @@ def initial_alignment(s_df, v_df=None, init_seconds=5.0):
     return quat_normalize(q0), yaw_observable
 
 
+def initial_gyro_bias(s_df, search_s=60.0, win=30, step=10, max_span_s=30.0):
+    """
+    Gyro bias from the first standstill in the opening `search_s` seconds.
+
+    IMU-only stationarity (no GNSS, no VBOX): over a 3 s window (30 samples at
+    10 Hz) the summed per-axis accel variance < 0.10 (m/s²)², |mean gyro| < 0.05
+    rad/s and every gyro axis std < 0.03 rad/s. The first such window is grown
+    forward in 1 s steps while it stays quiet (at most `max_span_s`) and the gyro
+    mean over that span is the bias, in body [x, y, z] = [roll, pitch, yaw] order.
+
+    Only the start-up calibration period is used, so a real app could do the same
+    while parked. Returns (bias[3], (t_start, t_end)), or (None, None) when the
+    phone was never at rest — the caller then starts from zero bias.
+    """
+    t = s_df["timestamp_s"].values
+    n = int(np.searchsorted(t, search_s))
+    A = s_df[["linear_accel_x", "linear_accel_y", "linear_accel_z"]].values[:n]
+    G = s_df[["gyro_roll_rads", "gyro_pitch_rads", "gyro_yaw_rads"]].values[:n]
+    finite = np.all(np.isfinite(A), axis=1) & np.all(np.isfinite(G), axis=1)
+
+    def quiet(i):
+        if i + win > n or not finite[i:i + win].all():
+            return False
+        a, g = A[i:i + win], G[i:i + win]
+        return (a.var(axis=0).sum() < 0.10
+                and np.linalg.norm(g.mean(axis=0)) < 0.05
+                and g.std(axis=0).max() < 0.03)
+
+    for i in range(0, n - win + 1, step):
+        if quiet(i):
+            j = i
+            while quiet(j + step) and (j + step - i) * 0.1 < max_span_s:
+                j += step
+            end = j + win
+            return G[i:end].mean(axis=0), (float(t[i]), float(t[end - 1]))
+    return None, None
+
+
 # ── INS propagation ───────────────────────────────────────────────────────────
 @dataclass
 class NominalState:
@@ -751,7 +789,8 @@ def run_pipeline(
 
     # ── initial alignment ─────────────────────────────────────────────────
     q0, yaw_obs = initial_alignment(s_df, v_df=v_df)
-    state = NominalState(q=q0)
+    bg0, _ = initial_gyro_bias(s_df)
+    state = NominalState(q=q0, bg=bg0 if bg0 is not None else np.zeros(3))
 
     dt_nominal = 0.1   # 10 Hz
     # All modes use the standard ESEKF. InESEKF's gyro-bias Jacobian block

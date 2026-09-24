@@ -89,6 +89,7 @@ Starting point = a+b+d+e (row "start" below). Columns as in the Step 2 table.
 | A1 speed already m/s (no /3.6) | 48.92 | 150.42 | 150.42 | 121.6 | 13.0 | 2425 | 11.98 | 0 % | 4.74 | **better; committed** |
 | A2 gyro z <- 'Pitch' column | 54.96 | 131.06 | 131.06 | 159.0 | 34.1 | 1989 | 11.42 | 0 % | 5.51 | **mixed (mean worse, end/pre/path/disp better); kept — proven axis, prerequisite for A3** |
 | A3a P0[δbg] variance 1e-4 (σ 0.01 rad/s) | 92.55 | 222.62 | 223.23 | 264.5 | 94.5 | 304 | 11.38 | 0 % | 4.97 | **mixed by the rule (mean/end/max worse; disp, spin, bias better); kept — bias now physical, see below** |
+| A3b bg init from first standstill (none found on S3b) | 92.55 | 222.62 | 223.23 | 264.5 | 94.5 | 304 | 11.38 | 0 % | 4.97 | neutral on S3b (identical to A3a); committed |
 
 ### A1 — GPS speed units (proof)
 Speed implied by differencing consecutive NEW fixes (~9 s apart; intervals with reported speed
@@ -157,3 +158,12 @@ Observation, not changed: other P0 entries are also variances read as σ in thei
 Disclosure: to see what a standstill looks like I printed the first 60 s of IMU stats for S1 as well as
 S3b (S1: clean rest ~9–47 s, accel var ≈ 0.02; S3b: no rest in the first 60 s, accel var ≥ 0.5). No
 outage score was computed on S1.
+
+### A3b — start-up gyro bias from the first standstill
+`initial_gyro_bias()` in ins_ekf.py: IMU-only, first 60 s, 3 s window with summed per-axis accel variance
+< 0.10, |mean gyro| < 0.05 rad/s, per-axis gyro std < 0.03 rad/s; window grown while quiet (≤ 30 s); zero bias
+if no standstill. Detector output: S3b → none (car already moving; accel var ≥ 0.5 in every window), S1 →
+rest at 10.0–41.9 s, bias (−0.0003, −0.0007, +0.0004) rad/s. Thresholds have ~5× margin over what a parked
+phone looks like and I chose them after looking at the S1 rest windows (disclosed above) — no outage score
+was involved. Because S3b has no standstill, S3b numbers are unchanged. Causality note: this uses the first
+60 s of data to seed t=0, equivalent to a start-up calibration while parked.
