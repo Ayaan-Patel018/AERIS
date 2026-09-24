@@ -91,6 +91,7 @@ Starting point = a+b+d+e (row "start" below). Columns as in the Step 2 table.
 | A3a P0[δbg] variance 1e-4 (σ 0.01 rad/s) | 92.55 | 222.62 | 223.23 | 264.5 | 94.5 | 304 | 11.38 | 0 % | 4.97 | **mixed by the rule (mean/end/max worse; disp, spin, bias better); kept — bias now physical, see below** |
 | A3b bg init from first standstill (none found on S3b) | 92.55 | 222.62 | 223.23 | 264.5 | 94.5 | 304 | 11.38 | 0 % | 4.97 | neutral on S3b (identical to A3a); committed |
 | A4 causal GNSS (new fixes only, σ=max(acc,3), IMU-only ZUPT) — commit f256fe5 | 310.29 | 465.80 | 465.80 | 360.7 | 158.5 | 382 | **251.57** | 0 % | 163.93 | **much worse — reverted (ab46a2e)** |
+| A5 NHC gain K[6:15]=0, Joseph form (retry of c) | 49.94 | 145.55 | 145.55 | 171.7 | 29.1 | 737 | 11.97 | 0 % | 4.88 | **better on mean/end/max/path/yaw; disp and pre-outage slightly worse; committed** |
 
 ### A1 — GPS speed units (proof)
 Speed implied by differencing consecutive NEW fixes (~9 s apart; intervals with reported speed
@@ -206,3 +207,17 @@ Conclusion: with honest, causal, sparse GNSS this 15-state filter cannot hold he
 observable from GNSS course (mount-independent yaw rate + a vehicle-frame forward speed) — that is Phase B's
 vehicle_dr design, not another patch on the ESEKF. Also note for Phase B: the 10-Hz-interpolated updates should NOT
 be reintroduced; use new fixes only, and do not clip-and-discard corrections.
+
+### A5 — NHC gain fix retried (now that the gyro axis is right)
+K[6:15,:] = 0 with the gain computed inline and a Joseph-form covariance update. Result vs A3b: outage mean
+92.6 → 49.9 m, end 222.6 → 145.6 m, path 264 → 172 m (truth 225), total |Δyaw| 304° → 737° (truth 663°);
+worse: displacement 94.5 → 29.1 m (truth 153), pre-outage 11.38 → 11.97 m. Matches the earlier in-memory
+"axis + speed + c + P0_bg" experiment exactly (49.94 m). It failed in Step 2 (c) only because the gyro axis
+was wrong then, as predicted.
+
+## Phase A summary (S3b, honest v_df=None)
+Final state (A5): outage mean 49.9 m, end 145.6 m, displacement 29 m vs truth 153 m, pre-outage 12.0 m vs raw
+phone GNSS 5.7 m, truth inside 1σ 0 % (σ at 260 s = 2.4 m). Versus the honest baseline: mean 68.2 → 49.9 m,
+end 159.6 → 145.6 m, pre-outage 17.4 → 12.0 m, |Δyaw| 1118° → 737°. Displacement is still ~5× too short and the
+filter is still wildly over-confident. The pre-outage 12 m is GNSS-following (see A4), not INS quality, and the
+honest causal-GNSS version of this filter fails outright. Recommendation: Phase B (vehicle_dr).

@@ -491,7 +491,14 @@ class ESEKF:
         H[1, 3:6] = R_nb[2, :]    # vertical
 
         R_noise = np.diag([SIGMA_NHC_LAT**2, SIGMA_NHC_VERT**2])
-        self._update(H, R_noise, z_nhc)
+        # Gain computed inline so rows for attitude and biases can be zeroed
+        # (the generic _update() would apply the full 15x2 gain).
+        S = H @ self.P @ H.T + R_noise
+        K = self.P @ H.T @ np.linalg.inv(S)
+        K[6:15, :] = 0.0
+        self.dx = self.dx + K @ (z_nhc - H @ self.dx)
+        I_KH = np.eye(self.n) - K @ H
+        self.P = I_KH @ self.P @ I_KH.T + K @ R_noise @ K.T  # Joseph form
 
     def update_fwd_speed(self, state: NominalState, speed_fwd_ms: float) -> None:
         """
