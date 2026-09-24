@@ -55,6 +55,8 @@ SIGMA_NHC_TURN      = SIGMA_NHC_LAT  # backwards-compat alias
 
 SIGMA_ZARU          = 0.01     # rad/s   near-zero angular rate noise (ZARU, at confirmed stops)
 
+SIGMA_TILT          = 0.2      # m/s²    phone gravity-vector noise (roll/pitch reference)
+
 # ── lat/lon → local ENU ──────────────────────────────────────────────────────
 def latlon_to_enu(lat, lon, lat0, lon0):
     """
@@ -527,6 +529,21 @@ class ESEKF:
         z = gyro_body - state.bg           # innovation: measured ≈ bg when stationary
         self._update(H, R, z)
 
+    def update_gravity_tilt(self, state: NominalState, g_body: np.ndarray) -> None:
+        """
+        Roll/pitch reference from the phone's gravity sensor.
+        The filter integrates gravity-removed acceleration, so nothing else
+        observes tilt. Measurement: g_body ≈ R^T [0,0,g]; for a right
+        perturbation R = R̂(I + [δθ]×), ∂(R^T g_n)/∂δθ = [R̂^T g_n ×].
+        """
+        if not np.all(np.isfinite(g_body)) or np.linalg.norm(g_body) < 5.0:
+            return
+        R = quat_to_rot(state.q)
+        pred = R.T @ np.array([0.0, 0.0, G_MS2])
+        H = np.zeros((3, self.n))
+        H[:, 6:9] = skew(pred)
+        self._update(H, np.eye(3) * SIGMA_TILT**2, g_body - pred)
+
     def inject_corrections(self, state: NominalState) -> NominalState:
         """
         Apply error state corrections to nominal state, then reset error state.
@@ -736,12 +753,10 @@ def run_pipeline(
     state = NominalState(q=q0)
 
     dt_nominal = 0.1   # 10 Hz
-    # mode='full' uses the Left-Invariant ES-EKF (InESEKF) — Lie-group aware
-    # Jacobian and left-multiplication inject, which stay consistent during long
-    # GNSS outages (>60s) where δθ can grow past the ~5° first-order regime.
-    # Ablation modes (ins_only/ins_gnss/ins_nhc) use the standard ESEKF so the
-    # existing 161 tests are completely unaffected.
-    ekf = InESEKF(dt=dt_nominal) if mode == "full" else ESEKF(dt=dt_nominal)
+    # All modes use the standard ESEKF. InESEKF's gyro-bias Jacobian block
+    # F[6:9,12:15] is -I*dt where a left-invariant error needs -R*dt, which lets
+    # the gyro-bias estimate run away (see AERIS_FINDINGS.md).
+    ekf = ESEKF(dt=dt_nominal)
 
     # ── SIM AIDING: pre-interpolate vehicle columns onto s_df timestamps ─
     # v_df timestamps may differ slightly from s_df; interpolate to align.
@@ -830,6 +845,10 @@ def run_pipeline(
         if store_smoothing_data:
             smooth_F.append(ekf.last_F.copy())
             smooth_P_pred.append(ekf.P.copy())   # covariance right after predict, before any update
+
+        # Roll/pitch reference from the phone's gravity sensor
+        ekf.update_gravity_tilt(state, np.array([
+            row["gravity_x"], row["gravity_y"], row["gravity_z"]], dtype=float))
 
         # ── GNSS availability ─────────────────────────────────────────────
         t = row["timestamp_s"]
