@@ -90,6 +90,7 @@ Starting point = a+b+d+e (row "start" below). Columns as in the Step 2 table.
 | A2 gyro z <- 'Pitch' column | 54.96 | 131.06 | 131.06 | 159.0 | 34.1 | 1989 | 11.42 | 0 % | 5.51 | **mixed (mean worse, end/pre/path/disp better); kept — proven axis, prerequisite for A3** |
 | A3a P0[δbg] variance 1e-4 (σ 0.01 rad/s) | 92.55 | 222.62 | 223.23 | 264.5 | 94.5 | 304 | 11.38 | 0 % | 4.97 | **mixed by the rule (mean/end/max worse; disp, spin, bias better); kept — bias now physical, see below** |
 | A3b bg init from first standstill (none found on S3b) | 92.55 | 222.62 | 223.23 | 264.5 | 94.5 | 304 | 11.38 | 0 % | 4.97 | neutral on S3b (identical to A3a); committed |
+| A4 causal GNSS (new fixes only, σ=max(acc,3), IMU-only ZUPT) — commit f256fe5 | 310.29 | 465.80 | 465.80 | 360.7 | 158.5 | 382 | **251.57** | 0 % | 163.93 | **much worse — reverted (ab46a2e)** |
 
 ### A1 — GPS speed units (proof)
 Speed implied by differencing consecutive NEW fixes (~9 s apart; intervals with reported speed
@@ -167,3 +168,41 @@ rest at 10.0–41.9 s, bias (−0.0003, −0.0007, +0.0004) rad/s. Thresholds ha
 phone looks like and I chose them after looking at the S1 rest windows (disclosed above) — no outage score
 was involved. Because S3b has no standstill, S3b numbers are unchanged. Causality note: this uses the first
 60 s of data to seed t=0, equivalent to a start-up calibration while parked.
+
+### A4 — causal GNSS: why it fails on the ESEKF (reverted; code kept in f256fe5)
+As specified: interpolation deleted; position update only on rows where lat/lon changed, σ = max(gps_accuracy_m, 3);
+speed/course only on new fixes > 2 m/s; ZUPT detector switched to IMU-only (it read the held GPS speed between fixes).
+Tests still 161/161. But S3b pre-outage error went 11.4 → 251.6 m (max 424 m).
+
+Scratch variants (repo untouched; all pre-outage 20–200 s mean, m — outage numbers are NOT used to judge):
+
+| variant (on top of A4) | pre-outage | outage mean |
+|---|---|---|
+| A4 as specified | 251.6 | 310.3 |
+| + no injection clip | 103.7 | 103.4 |
+| + residual carried instead of discarded | 108.9 | 129.1 |
+| + carry, NHC off (ins_gnss) | 152.4 | 785.3 |
+| + carry, NHC forward axis rotated φ=−45° / +45° / ±90° | 131.4 / 93.3 / 88.1 | 181.7 / 192.3 / 267.2 |
+| + carry + initial yaw convention fixed (90°−bearing) | 85.7 | 140.6 |
+| + carry + yaw fix + φ=−45° / +45° / NHC off | 135.6 / 127.2 / 121.4 | 112.2 / 309.4 / 442.5 |
+
+Findings:
+1. **The 1 m/step "smooth injection" clip is a latent bug that sparse fixes expose**: 812 of 6812 steps clipped and
+   6185 m of position correction discarded, while P shrinks as if fully applied. (`dx` is zeroed after injection.)
+2. **The filter's heading has no relationship to the vehicle course.** Heading (converted to a bearing) minus the phone's
+   GNSS course at 17 pre-outage fixes: causal run mean −10.9°, std 116.5°, median |diff| 94°; on the committed A3b code
+   (interpolated GNSS) mean +62.6°, std 126.9°, median |diff| 146° — a large slowly drifting offset (+105° … +179°).
+   Speed error vs GNSS speed: −1.3 ± 3.0 m/s (causal) and −0.7 ± 1.7 m/s (A3b).
+3. **So the ~11 m pre-outage error of the committed code was GNSS-following, not INS quality**: 10 Hz interpolated
+   position + velocity updates (σ 1 m / 0.3 m/s each, using the *next* fix up to 9 s early) drag the position along the GNSS
+   track regardless of the heading state. Remove them and dead reckoning between 9 s fixes is unconstrained.
+4. **Why heading is unobservable here**: velocity is a nav-frame state integrated from linear acceleration; there is no
+   forward-speed / heading coupling. A GNSS velocity's direction reaches yaw only through F[v,θ] = −R[a×]dt, i.e. only
+   while accelerating. NHC is the only place yaw enters, and it assumes phone x = vehicle forward, which the data
+   contradicts (A2: horizontal axes ~45° off on S1).
+5. The initial-yaw convention bug (bearing CW-from-N fed to a CCW-from-E filter) is real (109 → 86 m when fixed) but not
+   the main problem.
+Conclusion: with honest, causal, sparse GNSS this 15-state filter cannot hold heading. Rescuing it needs a heading
+observable from GNSS course (mount-independent yaw rate + a vehicle-frame forward speed) — that is Phase B's
+vehicle_dr design, not another patch on the ESEKF. Also note for Phase B: the 10-Hz-interpolated updates should NOT
+be reintroduced; use new fixes only, and do not clip-and-discard corrections.
