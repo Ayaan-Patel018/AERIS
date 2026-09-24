@@ -116,10 +116,28 @@ def load_smartphone(path: str) -> pd.DataFrame:
     df["linear_accel_y"] = df["accel_y"] - df["gravity_y"]
     df["linear_accel_z"] = df["accel_z"] - df["gravity_z"]
 
-    # Gyroscope — confirmed axis order: Yaw, Pitch, Roll
+    # Gyroscope — the CSV headers do NOT match the physical axes.
+    # The output names below are PHYSICAL body axes (run_pipeline reads
+    # [gyro_roll, gyro_pitch, gyro_yaw] as body [x, y, z], z = vertical/up):
+    #   gyro_yaw_rads   (vertical, body z) <- CSV "GYROSCOPE Pitch"
+    #   gyro_pitch_rads (body y)           <- CSV "GYROSCOPE Yaw"
+    #   gyro_roll_rads  (body x)           <- CSV "GYROSCOPE Roll"
+    # Evidence for the vertical axis (A2, AERIS_FINDINGS.md): all 48 signed
+    # axis mappings tested by integrating omega.g_hat between consecutive NEW
+    # phone GNSS fixes (both > 3 m/s) and correlating with the GNSS course
+    # change (counter-clockwise positive). Best on BOTH drives is z <- +Pitch:
+    #   S3b (52 intervals): corr +0.67, slope +1.29   (old z<-Yaw: corr +0.06)
+    #   S1 (405 intervals): corr +0.91, slope +0.94   (old z<-Yaw: corr +0.45)
+    # Next best z choice: corr +0.10 (S3b) / 0.80 (S1, slope only 0.13).
+    # NOT resolved by the data: the x/y roles. The gravity columns are ~constant
+    # (0,0,9.81), so omega.g_hat is insensitive to them. x<-Roll, y<-Yaw is the
+    # minimal change from the old mapping; it only touches roll/pitch dynamics,
+    # which the gravity-tilt update pins anyway. NOTE: the phone's horizontal axes
+    # are also not aligned with the car (S1: lateral direction ~45 deg between
+    # phone x and y), so "body x = forward" is not true for this data.
     df.rename(columns={
-        "GYROSCOPE Yaw (rad/s)":   "gyro_yaw_rads",
-        "GYROSCOPE Pitch (rad/s)": "gyro_pitch_rads",
+        "GYROSCOPE Pitch (rad/s)": "gyro_yaw_rads",
+        "GYROSCOPE Yaw (rad/s)":   "gyro_pitch_rads",
         "GYROSCOPE Roll (rad/s)":  "gyro_roll_rads",
     }, inplace=True)
 

@@ -87,6 +87,7 @@ Starting point = a+b+d+e (row "start" below). Columns as in the Step 2 table.
 |---|---|---|---|---|---|---|---|---|---|---|
 | start (46b380a) | 62.44 | 198.08 | 198.08 | 174.2 | 41.1 | 466 | 18.21 | 0 % | 2.38 | — |
 | A1 speed already m/s (no /3.6) | 48.92 | 150.42 | 150.42 | 121.6 | 13.0 | 2425 | 11.98 | 0 % | 4.74 | **better; committed** |
+| A2 gyro z <- 'Pitch' column | 54.96 | 131.06 | 131.06 | 159.0 | 34.1 | 1989 | 11.42 | 0 % | 5.51 | **mixed (mean worse, end/pre/path/disp better); kept — proven axis, prerequisite for A3** |
 
 ### A1 — GPS speed units (proof)
 Speed implied by differencing consecutive NEW fixes (~9 s apart; intervals with reported speed
@@ -106,3 +107,29 @@ resets (raw ends at 477 s; loader's cumulative timestamp gives 681 s) — any di
 Test suite after A1: 161 run / 161 pass; 37 dataset tests SKIP because `run_tests.py` reports
 IO-VNBD "NOT FOUND" (its dataset detection differs from `get_dataset_root()`), so the tests do
 not exercise the real loader.
+
+### A2 — gyro axes (evidence)
+Method: for each of the 6 column→(x,y,z) permutations × 8 sign combinations, omega_vert = omega_body · g_hat
+(per-sample gravity columns), integrated over each interval between consecutive NEW phone fixes where both
+fixes have speed > 3 m/s (dt < 15 s), correlated with -Δheading (GNSS course, wrapped; CCW-positive).
+Sensor spikes |ω| > 5 rad/s zeroed for the diagnostic.
+
+| drive | intervals | best mapping (z axis) | corr | slope (1.0 ideal) | old pipeline z←Yaw | next best z |
+|---|---|---|---|---|---|---|
+| S3b | 52 (1688° total course change) | **z ← +Pitch column** | +0.671 | +1.288 | corr +0.057, slope +0.013 | +0.099 (Yaw) |
+| S1 | 405 (11384° total) | **z ← +Pitch column** | +0.913 | +0.936 | corr +0.451, slope +0.055 | +0.804 (−Roll, slope 0.126) |
+
+Same answer on both drives. Sign is positive (Pitch column is counter-clockwise-positive about up).
+
+Not resolved by the data: x/y roles. Gravity columns are essentially constant — mean (0.000, 0.000, 9.806),
+std (0.075, 0.076, 0.020) on S3b and (0.019, 0.023, 0.000) on S1, ĝ_z mean 0.9999/1.0000 — so ω·ĝ is
+insensitive to them. Chose x←Roll, y←Yaw (minimal change). Only affects roll/pitch dynamics, which the
+gravity-tilt update pins.
+
+**New finding — the phone's horizontal axes are not aligned with the car.** Centripetal check
+(corr of accel_x / accel_y with v·ω_vert, v>3 m/s, |ω|>0.05): S1 accel_x +0.405 (slope 0.271),
+accel_y +0.446 (slope 0.276) → the lateral direction sits ≈ 45° between phone x and y, i.e. forward is
+about (+0.71, −0.70) in phone coordinates, not +x. S3b showed no usable signal (0.04 / 0.06;
+interpolated 9 s GNSS speed is too coarse there). Consequence: the ESEKF's NHC (lateral = body y,
+forward = body x) and its initial-yaw-from-GNSS-course both assume x = forward, which is wrong for this
+data. Phase B is designed to estimate the forward axis from pre-outage data.
