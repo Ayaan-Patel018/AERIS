@@ -408,10 +408,14 @@ class ESEKF:
 
     def update_gnss_position(self, state: NominalState,
                              gps_enu: np.ndarray,
-                             quality: str = "healthy") -> None:
-        """GNSS position update — adaptive noise by quality classification.
+                             quality: str = "healthy",
+                             sigma: Optional[float] = None) -> None:
+        """GNSS position update.
 
-        Noise scales with GNSS quality so degraded fixes are trusted less.
+        `sigma` (metres, 1σ) overrides the quality-class noise when given —
+        run_pipeline passes the receiver's own reported accuracy. Otherwise
+        noise scales with the quality classification so degraded fixes are
+        trusted less.
         NHC holds P[pos] tighter than the true dead-reckoning error during
         outages, which would cause a chi-sq gate to block re-acquisition
         after a genuine outage — so gating is deferred to Phase 2 once the
@@ -419,9 +423,10 @@ class ESEKF:
         """
         noise_scale = {"healthy": 1.0, "degraded": 3.0, "unavailable": 10.0}
         scale = noise_scale.get(quality, 1.0)
+        sig = float(sigma) if sigma is not None else SIGMA_GNSS_POS * scale
         H = np.zeros((3, self.n))
         H[0:3, 0:3] = np.eye(3)
-        R = np.eye(3) * (SIGMA_GNSS_POS * scale)**2
+        R = np.eye(3) * sig**2
         z = gps_enu - state.p
         self._update(H, R, z)
 
@@ -825,15 +830,11 @@ def run_pipeline(
     zaru_trigger_count = 0
     is_stationary = False
 
-    # Pre-process GNSS observations: interpolate zero-order hold (ZOH) steps
-    # to provide continuous, smooth sensor updates without 10-second staircase hops
-    s_work = s_df.copy()
-    if "gps_lat" in s_work.columns and "gps_lon" in s_work.columns:
-        for col in ["gps_lat", "gps_lon", "gps_speed_ms", "gps_heading_deg"]:
-            if col in s_work.columns and s_work[col].notna().any():
-                diff = s_work[col].diff()
-                s_work.loc[diff == 0, col] = np.nan
-                s_work[col] = s_work[col].interpolate(method="linear")
+    # GNSS is used CAUSALLY: the phone's fix repeats (zero-order hold) for ~9 s
+    # between real fixes, so a fix is only "new" on the row where lat/lon changes.
+    # No interpolation — interpolating between fixes uses the NEXT fix early and
+    # invents measurements that never happened (see AERIS_FINDINGS.md, A4).
+    s_work = s_df
 
     for i in range(1, n):
         row_prev = s_work.iloc[i-1]
@@ -926,56 +927,49 @@ def run_pipeline(
                 gnss_flag   = "healthy"
 
         # ── A3: Variance-based ZUPT — detect stationary vehicle ──────────
-        # Detects stationary vehicle at traffic lights and stops.
-        # When GNSS is available, uses GPS Doppler speed < 0.35 m/s + accel_var < 0.25.
-        # When GNSS is in outage, uses purely IMU metrics (accel_var < 0.22 and gyro_norm < 0.08 rad/s)
-        # to guarantee stationary detection without relying on denied GNSS speed.
+        # Purely IMU-based (accel_var, gyro_norm, current speed estimate) in every
+        # phase. It used to switch to GPS Doppler speed while GNSS was available,
+        # but between the ~9 s fixes that speed is a stale held value — a GNSS
+        # input between fixes — so it can pin v=0 after the car has moved off.
         zupt_active = False
         if cfg["use_nhc"] and i >= 10:
             recent_accel = s_work[["linear_accel_x", "linear_accel_y",
                                    "linear_accel_z"]].iloc[i-10:i+1]
             accel_var = float(recent_accel.values.var())
             gyro_norm = float(np.linalg.norm(gyro))
-            if gnss_available:
-                recent_speeds = s_work["gps_speed_ms"].iloc[i-10:i+1]
-                if (recent_speeds < 0.35).all() and not recent_speeds.isna().any() and accel_var < 0.25:
+            if is_stationary:
+                # Car was stopped; maintain standstill until departure motion is detected
+                if accel_var < 0.25 and gyro_norm < 0.18:
+                    zupt_active = True
+                else:
+                    is_stationary = False
+            else:
+                # Car was moving; only enter standstill if speed is already low and IMU is calm
+                cur_spd = float(np.linalg.norm(state.v[:2]))
+                if cur_spd < 1.0 and accel_var < 0.20 and gyro_norm < 0.08:
                     zupt_active = True
                     is_stationary = True
-                else:
-                    if accel_var >= 0.30 or gyro_norm >= 0.22:
-                        is_stationary = False
-            else:
-                if is_stationary:
-                    # Car was stopped; maintain standstill until departure motion is detected
-                    if accel_var < 0.25 and gyro_norm < 0.18:
-                        zupt_active = True
-                    else:
-                        is_stationary = False
-                else:
-                    # Car was moving; only enter standstill if speed is already low and IMU is calm
-                    cur_spd = float(np.linalg.norm(state.v[:2]))
-                    if cur_spd < 1.0 and accel_var < 0.20 and gyro_norm < 0.08:
-                        zupt_active = True
-                        is_stationary = True
 
-        # ── GNSS update (smooth continuous track) ─────────────────────────
-        if gnss_available:
-            cur_lat = row["gps_lat"]
-            cur_lon = row["gps_lon"]
-            gps_enu = latlon_to_enu(cur_lat, cur_lon, lat0, lon0)
-            ekf.update_gnss_position(state, gps_enu, quality=gps_quality)
+        # ── GNSS update — causal, only on rows carrying a NEW fix ─────────
+        # New fix = lat/lon changed since the previous row (the phone holds the
+        # last fix for ~9 s). Nothing from GNSS enters the filter between fixes.
+        new_fix = bool(gnss_available
+                       and (row["gps_lat"] != row_prev["gps_lat"]
+                            or row["gps_lon"] != row_prev["gps_lon"]))
+        if new_fix:
+            gps_enu = latlon_to_enu(row["gps_lat"], row["gps_lon"], lat0, lon0)
+            acc = row.get("gps_accuracy_m", np.nan)
+            # σ = the receiver's reported accuracy, floored at 3 m; unknown → 10 m
+            sigma_pos = max(float(acc), 3.0) if np.isfinite(acc) else 10.0
+            ekf.update_gnss_position(state, gps_enu, sigma=sigma_pos)
 
             cur_spd = row["gps_speed_ms"]
             cur_hdg = row["gps_heading_deg"]
-            if not np.isnan(cur_spd):
-                # A2: Scalar speed update — fires whenever Doppler speed is available,
-                # even if heading is NaN (common at low speed / first GPS fix).
+            # Speed / course are only meaningful while actually moving (> 2 m/s)
+            if np.isfinite(cur_spd) and cur_spd > 2.0:
                 ekf.update_gnss_speed(state, float(cur_spd))
-
-            if not np.isnan(cur_spd) and not np.isnan(cur_hdg):
-                # 3-DOF vector velocity update — requires both speed AND heading.
-                gps_vel = gps_to_enu_velocity(cur_spd, cur_hdg)
-                ekf.update_gnss_velocity(state, gps_vel)
+                if np.isfinite(cur_hdg):
+                    ekf.update_gnss_velocity(state, gps_to_enu_velocity(cur_spd, cur_hdg))
 
         # ── NHC update ────────────────────────────────────────────────────
         if cfg["use_nhc"]:
