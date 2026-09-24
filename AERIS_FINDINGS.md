@@ -268,3 +268,25 @@ Data hole: the phone has no data for ~4.3 s at S-time ≈ 204 s (the car was sto
 
 (The 200–260 s window now spans different phone rows after the hole, and truth is looked up at the aligned VBOX time.
 Numbers before this point in the log are on the old timeline and are not comparable to numbers after it.)
+
+
+## B1 — mini-outage metric (check_outage.py, new section; old output kept)
+For every interval between consecutive NEW phone fixes, AERIS error vs VBOX (aligned time) on the last row BEFORE the next
+fix arrives = pure dead reckoning since the previous fix, IF the filter used no GNSS in between. New flags:
+`--filter {esekf,vehicle_dr}`, `--fixes-only` (data-only: rows that are not new fixes report 0 satellites so the UNMODIFIED
+ESEKF receives GNSS only on new-fix rows), `--mini-only`. Two phone-only trivial baselines are scored from the same fix:
+hold = stay at the last fix; cv = last fix + its GNSS speed along its GNSS course.
+S3b: intervals whose next fix is ≤ 200 s (the tuning set). S1: all intervals outside the 200–260 s outage.
+
+| filter / baseline | S3b (20 intervals, 9.1 s avg) mean / median / max (m) | S1 (523 intervals, 9.6 s avg) mean / median / max (m) |
+|---|---|---|
+| ESEKF as shipped (interpolated 10 Hz GNSS — NOT dead reckoning, this is tracking) | 12.90 / 10.35 / 43.04 | 10.69 / 8.69 / 233.08 |
+| **ESEKF fixes-only (its real DR quality)** | **148.02 / 151.96 / 309.49** | **347.98 / 267.99 / 1364.54** |
+| baseline: hold last fix | 52.95 / 59.55 / 106.70 | 72.21 / 70.66 / 172.60 |
+| **baseline: last fix + constant velocity (bar to beat)** | **34.89 / 39.71 / 73.36** | **26.67 / 22.78 / 136.20** |
+
+Moving-only intervals (both fixes > 2 m/s): S3b n=15: ESEKF 15.43 (shipped) / 133.32 (fixes-only), hold 61.84, cv 35.96;
+S1 n=429: 11.29 / 358.43, hold 81.79, cv 26.34. Truth inside 1σ: 0.0 % on both drives for both ESEKF variants (reported σ
+0.2 m shipped, 2.5 m / 1.7 m fixes-only vs errors of 100+ m).
+Reading: with honest GNSS use the ESEKF is 3–13× worse than doing nothing clever (last-fix + const-v) — consistent with the
+A4 finding. The S1 ESEKF numbers above are the frozen reference; no tuning was done on S1.
