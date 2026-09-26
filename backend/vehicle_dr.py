@@ -115,6 +115,13 @@ class VDRParams:
     sigma_cent: float = 1.0          # m/s²   measurement noise (inflated: forward accel + vibration + phone frame)
     cent_res: float = 0.6            # m/s²   residual-acceleration floor in the model
     cent_bg_coupling: bool = False   # False: omega is treated as known, so the update cannot steer the gyro bias
+    # B3d — phi-gated FIXED mount aiding (calibrated on data before mount_cal_t only)
+    use_fixed_mount: bool = False    # B3d: gate works and the sandbox gains 3x, but S1 validation shows no benefit (see AERIS_FINDINGS.md): off by default
+    mount_cal_t: float = 200.0       # s: calibration phase = data before this time; the fixed phi is usable from this time on
+    fixed_gate_corr: float = 0.8     # both mount-angle criteria must correlate above this ...
+    fixed_gate_diff_deg: float = 30.0  # ... and agree within this many degrees
+    sigma_lat: float = 0.8           # m/s²   signed centripetal a_lat = v*omega measurement noise
+    sigma_ba_rest: float = 0.15      # m/s²   forward-bias measurement at a standstill (a_h . u)
     # initial covariance (std devs)
     p0_pos: float = 5.0
     p0_psi: float = np.pi
@@ -136,6 +143,22 @@ def _causal_window_stats(x, w):
     mean = (cs[idx + 1] - cs[lo]) / cnt
     var = np.maximum((cs2[idx + 1] - cs2[lo]) / cnt - mean ** 2, 0.0)
     return mean, var
+
+
+def calibrate_fixed_mount(s_df, p: VDRParams):
+    """Fixed mount angle from the calibration phase (data before p.mount_cal_t, phone only), gated. Returns a dict with
+    both criteria, the circular-mean phi (radians, forward axis from phone +x toward +y) and `active`."""
+    from mount_angle import estimate_mount_angle
+    r = estimate_mount_angle(s_df[s_df["timestamp_s"] <= p.mount_cal_t], p.mount_cal_t)
+    ok = (np.isfinite(r["peak_i"]) and np.isfinite(r["peak_ii"]) and r["peak_i"] > p.fixed_gate_corr
+          and r["peak_ii"] > p.fixed_gate_corr and abs(r.get("diff_deg", 180.0)) <= p.fixed_gate_diff_deg)
+    out = dict(active=bool(ok), phi_i_deg=r["phi_i"], phi_ii_deg=r["phi_ii"], corr_i=r["peak_i"], corr_ii=r["peak_ii"],
+               diff_deg=r.get("diff_deg", float("nan")), n_i=r["n_i"], n_ii=r["n_ii"])
+    if ok:
+        z = np.exp(1j * np.radians([r["phi_i"], r["phi_ii"]])).mean()
+        out["phi"] = float(np.angle(z))
+        out["phi_deg"] = float(np.degrees(np.angle(z)))
+    return out
 
 
 def evaluate_launch(ax, ay, wv, bg, dts, i_rel, i_now, b_h, p: VDRParams):
@@ -198,7 +221,7 @@ class _EKF:
         self.psi_ready = False
         self.consec_pos_rej = 0
         self.gate_log = []
-        self.counts = {"pos": [0, 0], "speed": [0, 0], "course": [0, 0], "cent": [0, 0]}   # [accepted, rejected]
+        self.counts = {"pos": [0, 0], "speed": [0, 0], "course": [0, 0], "cent": [0, 0], "lat": [0, 0]}   # [accepted, rejected]
 
     # ── time update ───────────────────────────────────────────────────────────
     def predict(self, dt, omega, stationary, a_fwd=None):
@@ -311,6 +334,10 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
     d_lon = np.diff(lon) != 0
     new_fix[1:] |= (d_lat | d_lon) & np.isfinite(lat[1:]) & np.isfinite(lon[1:])
 
+    mount_cal = calibrate_fixed_mount(s_df, p) if p.use_fixed_mount else dict(active=False)
+    u_fixed = np.array([np.cos(mount_cal["phi"]), np.sin(mount_cal["phi"])]) if mount_cal["active"] else None
+    up_fixed = np.array([-u_fixed[1], u_fixed[0]]) if u_fixed is not None else None
+    fixed_on = False                                # becomes True at t >= mount_cal_t (calibration phase over)
     stationary = False
     t_out, pos_out, v_out, hd_out, cov_tr, cov_m, st_out, flags = [], [], [], [], [], [], [], []
     aided_out = []
@@ -342,9 +369,16 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
 
         # ── time update (a data hole > 1 s is propagated honestly, Q grows with dt) ──
         omega = wv[i]
+        if u_fixed is not None and not fixed_on and t >= p.mount_cal_t:
+            fixed_on = True                                        # calibration phase is over: the fixed phi may now be used
+            ekf.x[5] = float(b_h_last @ u_fixed)
+            ekf.P[5, :] = 0.0; ekf.P[:, 5] = 0.0; ekf.P[5, 5] = p.launch_sigma_ba ** 2
         a_f = None
-        if aided and u_fwd is not None and abs(omega - ekf.x[4]) < p.aided_w_max and (t - t_accept) < p.aided_max_s:
-            a_f = float(ax[i] * u_fwd[0] + ay[i] * u_fwd[1])      # in a turn v is held: a_h.u would leak v*omega
+        if abs(omega - ekf.x[4]) < p.aided_w_max:                  # in a turn v is held: a_h.u would leak v*omega
+            if aided and u_fwd is not None and (t - t_accept) < p.aided_max_s:
+                a_f = float(ax[i] * u_fwd[0] + ay[i] * u_fwd[1])   # a valid launch axis has priority
+            elif fixed_on:
+                a_f = float(ax[i] * u_fixed[0] + ay[i] * u_fixed[1])
         ekf.predict(dt, omega, stationary, a_f)
 
         # ── stationarity (IMU only) ──────────────────────────────────────────
@@ -461,6 +495,22 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
                 ok = ekf.update(np.array([z - h]), Hc, np.array([[p.sigma_cent ** 2]]), 1, "cent", t)
                 ekf.counts["cent"][0 if ok else 1] += 1
 
+        # ── B3d: with a trusted fixed mount ──────────────────────────────────
+        if fixed_on:
+            if stationary and i >= 5 and i % 5 == 0:               # a_fwd ~ b_a at a standstill
+                Hb = np.zeros((1, 6)); Hb[0, 5] = 1.0
+                zb = float(np.array([ax[i - 4:i + 1].mean(), ay[i - 4:i + 1].mean()]) @ u_fixed)
+                ekf.update(np.array([zb - ekf.x[5]]), Hb, np.array([[p.sigma_ba_rest ** 2]]), 1, "ba_rest", t, gated=False)
+            elif (not stationary) and i >= 15 and i % p.cent_every == 0 and ekf.x[3] > p.cent_v_min:
+                ws = float(wv[i - 4:i + 1].mean() - ekf.x[4])
+                ws_prev = float(wv[i - 14:i - 9].mean() - ekf.x[4])
+                if abs(ws) > p.cent_w_min and abs(ws - ws_prev) < p.cent_steady:
+                    a_vec = np.array([ax[i - 4:i + 1].mean(), ay[i - 4:i + 1].mean()]) - b_h_last
+                    Hl = np.zeros((1, 6)); Hl[0, 3] = ws           # a_lat = v * omega (signed: left turn +)
+                    ok = ekf.update(np.array([float(a_vec @ up_fixed) - ekf.x[3] * ws]), Hl,
+                                    np.array([[p.sigma_lat ** 2]]), 1, "lat", t)
+                    ekf.counts["lat"][0 if ok else 1] += 1
+
         # ── record ───────────────────────────────────────────────────────────
         E, N = ekf.x[0], ekf.x[1]
         t_out.append(float(t))
@@ -492,6 +542,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         "stationary": st_out,
         "aided": aided_out,
         "launches": launches,
+        "mount_calibration": mount_cal,
         "gate_log": ekf.gate_log,
         "gate_counts": {k: {"accepted": a, "rejected": r} for k, (a, r) in ekf.counts.items()},
         "psi_init_time": psi_init_t,

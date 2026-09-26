@@ -11,7 +11,7 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from sim_drive import simulate, SimConfig, default_route, multi_stop_route, wrap_pi, enu_to_latlon, LAT0, LON0
+from sim_drive import simulate, SimConfig, default_route, multi_stop_route, long_route, wrap_pi, enu_to_latlon, LAT0, LON0
 
 LOADER_COLUMNS = [
     "timestamp_s", "gps_lat", "gps_lon", "gps_alt_m", "gps_speed_ms", "gps_heading_deg",
@@ -441,6 +441,72 @@ class TestCentripetalSpeed(unittest.TestCase):
         om = np.abs(tr.omega.values[k])
         self.assertGreater(len(times), 5)
         self.assertGreater(np.mean(om > 0.1), 0.9)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B3d — phi-gated fixed-mount aiding (gate verified; real S1 validation showed no benefit -> OFF by default)
+# ─────────────────────────────────────────────────────────────────────────────
+class TestFixedMountAiding(unittest.TestCase):
+    ON = staticmethod(lambda: _replace(vehicle_dr.VDRParams(), use_fixed_mount=True))
+    OFF = staticmethod(lambda: _replace(vehicle_dr.VDRParams(), use_fixed_mount=False))
+
+    @classmethod
+    def setUpClass(cls):
+        cls.stable = {}
+        for sd in (0, 1, 2):
+            s, tr = simulate(SimConfig(seed=sd, route=long_route()))
+            cls.stable[sd] = (s, tr,
+                              vehicle_dr.run_pipeline(s, None, outage_window=(200.0, 260.0), params=cls.OFF()),
+                              vehicle_dr.run_pipeline(s, None, outage_window=(200.0, 260.0), params=cls.ON()))
+
+    @staticmethod
+    def _after(res, s, tr, t0=260.0):
+        rows = [r for r in check_outage.mini_outage(res, s, tr, 0.0, skip=(200.0, 260.0)) if r["t_a"] >= t0]
+        return np.array([r["aeris"] for r in rows])
+
+    def test_default_is_off_because_s1_validation_showed_no_benefit(self):
+        self.assertFalse(vehicle_dr.VDRParams().use_fixed_mount)
+
+    def test_gate_opens_and_phi_is_recovered_on_a_stable_mount(self):
+        for sd, (s, tr, off, on) in self.stable.items():
+            mc = on["mount_calibration"]
+            self.assertTrue(mc["active"], (sd, mc))
+            self.assertLess(abs(np.degrees(vdr_wrap(np.radians(mc["phi_deg"] + 50.0)))), 10.0, (sd, mc["phi_deg"]))
+            self.assertGreater(min(mc["corr_i"], mc["corr_ii"]), 0.8)
+
+    def test_gate_closes_when_the_phone_moves_before_200s(self):
+        s, tr = simulate(SimConfig(seed=1, route=long_route(), mount_changes=((90.0, 100.0),)))
+        mc = vehicle_dr.calibrate_fixed_mount(s, self.ON())
+        self.assertFalse(mc["active"], mc)
+
+    def test_closed_gate_is_an_exact_noop(self):
+        s, tr = simulate(SimConfig(seed=1, route=long_route(), mount_changes=((90.0, 100.0),)))
+        a = vehicle_dr.run_pipeline(s, None, outage_window=(200.0, 260.0), params=self.OFF())
+        b = vehicle_dr.run_pipeline(s, None, outage_window=(200.0, 260.0), params=self.ON())
+        self.assertTrue(np.array_equal(np.array(a["positions"]), np.array(b["positions"])))
+
+    def test_calibration_phase_uses_only_data_before_200s(self):
+        s, tr, off, on = self.stable[0]
+        cut = s[s.timestamp_s <= 200.5].reset_index(drop=True)
+        full = vehicle_dr.calibrate_fixed_mount(s, self.ON())
+        part = vehicle_dr.calibrate_fixed_mount(cut, self.ON())
+        self.assertAlmostEqual(full["phi_deg"], part["phi_deg"], places=6)
+
+    def test_aiding_is_not_used_before_the_calibration_phase_ends(self):
+        s, tr, off, on = self.stable[0]
+        n = int(np.searchsorted(np.array(on["timestamps"]), 199.9))
+        self.assertTrue(np.array_equal(np.array(off["positions"])[:n], np.array(on["positions"])[:n]))
+
+    def test_aiding_helps_after_calibration_when_the_mount_is_stable(self):
+        for sd, (s, tr, off, on) in self.stable.items():
+            e0, e1 = self._after(off, s, tr), self._after(on, s, tr)
+            self.assertGreater(len(e0), 20)
+            self.assertLess(e1.mean(), 0.7 * e0.mean(), (sd, e0.mean(), e1.mean()))
+
+    def test_signed_centripetal_runs_inside_the_outage_only_when_active(self):
+        s, tr, off, on = self.stable[0]
+        self.assertTrue(any(g[1] == "lat" and 200.0 <= g[0] <= 260.0 for g in on["gate_log"]))
+        self.assertFalse(any(g[1] == "lat" for g in off["gate_log"]))
 
 
 if __name__ == "__main__":

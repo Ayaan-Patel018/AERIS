@@ -358,6 +358,8 @@ intervals whose truth lies inside the reported 1σ ellipse (target ≈ 39 %). Tr
 | **B3b** turn-compensated launch φ, **replay only** (aided_max_s = 0) | **21.93 / 17.11 / 64.85** | 22.12 | 64.35 / 145.89 | 75.5 | 104.9 | 50 % (LOO 45 %) | n/a (not allowed) | **PASS, marginal** (−0.53 m = −2.4 % vs B3a; 2 launches in the tuning window). Outage path 0.2 → 105 m, disp 0.1 → 75.5 m (reported, not tuned) |
 | B3c centripetal speed, defaults (σ 1.0, res 0.6) | 22.74 / 21.11 / 46.26 | – | 86.13 / 154.76 | 155.0 | 249.6 | 35 % | n/a | worse than B3b on the mean/median |
 | **B3c** centripetal speed, best S3b grid point (σ 4.0, res 0.3 — update nearly off) | 22.12 / 17.64 / 62.28 | 23.75 | 72.22 / 163.16 | 115.9 | 159.5 | 45 % (LOO 40 %) | n/a | **FAIL — reverted (`use_centripetal=False` default)**: no setting beats B3b (21.93); speed error in turns 1.81 → 1.73 m/s only |
+| B3b state measured on S1 (validation; = B3d "off") | – | – | – | – | – | – | **43.89 / 20.05 / 620** (cov 30 %) | reference: median beats const-v (22.78) but the mean does not (26.67): heavy tail |
+| **B3d** φ-gated fixed-mount aiding (gate: S3b **inactive** → identical to B3b; S1 **active**, φ = −65.5°) | 21.93 / 17.11 / 64.85 | 22.12 | 64.35 / 145.89 | 75.5 | 104.9 | 50 % | **on: 52.66 / 20.09 / 1097** (cov 20 %) vs off 43.89 | **NO BENEFIT on S1 → off by default** (sandbox: 3× better after calibration). Paired: better in 42 %, worse in 49 % of intervals, median +0.18 m |
 
 ### B3a — vehicle_dr core (`backend/vehicle_dr.py`, `backend/tune_vehicle_dr.py`)
 State [E, N, ψ, v, b_g, b_a]; ψ ENU radians (CCW from East), phone bearing → ψ = π/2 − radians(bearing) (unit-tested: cardinals, 45°,
@@ -437,3 +439,34 @@ accelerating out of junctions adds forward acceleration to |a_h| that the residu
 sound measurement that this speed-held filter cannot exploit better than it already does on S3b.
 Reported, not tuned: with the update on (σ 1.0) the 200–260 s outage SHAPE is much better (path 249.6 m vs truth 225.7, displacement 155.0 m vs 154.0) while the mean error is worse (86.1 m vs 64.4 m).
 Rule applied: fails "S3b mini-outage improves vs previous step" → off by default; code and sandbox tests kept.
+
+### B3d — φ-gated fixed-mount aiding (validation report; nothing tuned on S1)
+Gate (option 1), calibration on data before 200 s only: mount_angle criteria (i) and (ii) both corr > 0.8 and within 30°; φ = circular mean of the two; the fixed φ is usable only from t = 200 s (the end of the
+calibration phase — tested: results before 200 s are bit-identical with the feature on/off, and φ is unchanged if data after 200.5 s is removed). When active: forward accel propagated with u(φ) whenever no launch φ is valid
+(near-straight only, |ω − b_g| < 0.10), b_a seeded from the rest baseline and updated at standstills (a_h·u ≈ b_a), and a SIGNED centripetal update a_lat = v·ω (σ 0.8 m/s², steady turns, IMU-only so it also runs in the outage).
+Gate result: **S3b inactive** (corr 0.21 / 0.12, 171° apart — as in B2), so S3b numbers equal B3b exactly. **S1 active**: φ_i = −80° (corr 0.89), φ_ii = −51° (corr 0.93), 29° apart (limit 30°) → φ = −65.5°.
+Sandbox (stable mount, 568 s drive, 3 seeds): calibration φ within 10° of the true −50°; intervals after 260 s: 19.5–20.4 m (off) → 6.3–6.8 m (on), CV 28–29 m; a phone moved at 90 s closes the gate (corr 0.54 / 0.75). 8 tests.
+
+S1 validation, mini-outages (523 intervals outside 200–260 s; parameters exactly as tuned on S3b; no S1 tuning):
+
+| S1 | mean / median / max (m) | inside 1σ | moving mean |
+|---|---|---|---|
+| vehicle_dr, B3d off (B3b state) | 43.89 / 20.05 / 620.02 | 30 % | 46.15 |
+| vehicle_dr, B3d on | 52.66 / 20.09 / 1096.92 | 20 % | 57.33 |
+| baseline last fix + const-v | 26.67 / 22.78 / 136.20 | – | – |
+| baseline hold last fix | 72.21 / 70.66 / 172.60 | – | – |
+| ESEKF fixes-only (B1) | 347.98 / 267.99 / 1364.54 | 0 % | – |
+| ESEKF as shipped (tracking, not DR) | 10.69 / 8.69 / 233.08 | 0 % | – |
+
+First 200 s (16 intervals): identical on/off, 24.67 / 17.94 / 95.96 vs const-v 42.07. After 260 s (507 intervals): off 44.49 / 20.16 / 620, on 53.55 / 20.11 / 1097.
+Paired on − off per interval: median +0.18 m, mean +8.78 m; on better in 42 %, worse in 49 %, within 1 m in 9 %; p50 20.0 vs 20.1, p75 40.6 vs 46.6, p90 108 vs 124.5. Excluding lock-outs (both < 100 m, n = 432): mean 22.53 vs 23.82,
+median 17.05 vs 16.94. Fixed-φ aiding is neutral-to-slightly-negative on real data although it is 3× better on the sandbox: the calibrated φ is only good to ±25–30° (criteria disagree by 29°) and the real forward-accel signal
+is far noisier than the simulated one. Verdict: off by default; code and tests kept.
+
+**Important validation finding — the filter has a heavy error tail on S1 even with B3d off.** vehicle_dr's median (20.05) beats const-v (22.78) but the mean (43.89) does not (26.67).
+Percentiles (m): p50 20.0, p75 40.6, p90 108.0, p95 175.5, p99 331.4, max 620. Intervals > 100 m: 11.1 % (const-v 0.8 %), > 200 m: 4.0 %. Mean without the worst 5 %: 31.0 m (const-v on the same intervals 27.1).
+The 10 worst intervals cluster in a few episodes (t ≈ 1826–1979, 2798, 4162–4234) and at the interval-start fix BOTH the course and the position update were REJECTED by the 99 % gate in 9 of 10 (the 10th: position only).
+Over the whole drive: 107 course rejections, 94 position rejections, 29 forced position accepts, 1 speed rejection (S3b: 1 / 1 / 0 / 0). Reading: once ψ is wrong the hard gate rejects exactly the measurements that would repair it — a lock-out; only
+position has a "3 consecutive rejections → accept" failsafe, course has none, and a forced position accept does not repair ψ. This is a logic weakness of hard gating, visible on S1 but not S3b. I did NOT change the filter in response: S1 is a
+validation drive, and the fix (candidate B3i: robust Huber/Student-t GNSS updates, or a course failsafe) must be justified and verified on the sandbox and S3b, not by looking at S1.
+Caveat for B5: S1 has now been looked at several times (launch log, this report, tail characterisation), so it is no longer a pristine unseen drive; untouched same-driver, same-phone drives exist (S2 156 min, S3a 41 min, S3c 62 min, S4 158 min).

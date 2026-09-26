@@ -54,6 +54,21 @@ def default_route():
     ]
 
 
+def long_route():
+    """default_route() plus ~330 s more urban-style driving (turns, speed changes, two extra stops): ~660 s in total,
+    so there is data both before and well after the 200 s calibration phase / 200-260 s outage."""
+    extra = [
+        ("turn", -90.0, 12.0, 4.0), ("straight", 180.0, 11.0, 4.0), ("turn", +90.0, 12.0, 4.0),
+        ("straight", 220.0, 12.0, 4.0), ("turn", -90.0, 12.0, 4.0), ("straight", 140.0, 9.0, 0.0), ("stop", 14.0),
+        ("straight", 200.0, 11.0, 4.0), ("turn", +90.0, 12.0, 4.0), ("straight", 240.0, 12.0, 4.0),
+        ("turn", +90.0, 12.0, 4.0), ("straight", 160.0, 10.0, 4.0), ("turn", -90.0, 12.0, 4.0),
+        ("straight", 260.0, 12.0, 0.0), ("stop", 10.0), ("straight", 150.0, 10.0, 4.0), ("turn", +90.0, 12.0, 4.0),
+        ("straight", 200.0, 11.0, 0.0),
+    ]
+    r = default_route()
+    return r[:-1] + [("straight", 100.0, 10.0, 4.0)] + extra      # drop the final braking leg of default_route
+
+
 def multi_stop_route(turn_launch=False):
     """Repeated straight / stop cycles (5 launches in ~135 s) for launch-calibration tests. With turn_launch the
     car pulls away INTO a 90-degree junction turn, as in urban driving."""
