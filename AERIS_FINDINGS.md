@@ -30,7 +30,10 @@ a failed step stays in the code behind a flag set to OFF, with the reason logged
 | `backend/vehicle_dr.py` | THE new filter: 6-state [E, N, psi, v, b_g, b_a] EKF; `run_pipeline(s_df, None, outage_window, params, t_end)`; `VDRParams`; `bearing_to_psi`; `evaluate_launch`; `calibrate_fixed_mount` |
 | `backend/check_outage.py` | scoring: `python backend/check_outage.py [drive] [--filter esekf or vehicle_dr] [--fixes-only] [--mini-only] [--windows auto/tuning/all/off] [--per-window] [--unseal]` — 200-260 s outage report, **E0 along/cross + speed + path-ratio block**, mini-outage section (hold / const-v baselines) and, for vehicle_dr on S3b, the **sliding 60 s tuning windows** (`window_benchmark`, `score_track`, `Truth`, `summarize_windows` are importable for tuning scripts). Reserved drives S3c/S3a/S2/S4 need `--unseal`. |
 | `backend/window_plan.py` | deterministic sliding-window plan (phone fix availability + file time span only; the pre-registered rule); `python backend/window_plan.py S3c` reproduces the registered list (sha1 96375f11...) |
-| `backend/tests/test_eval_e0.py` | 29 tests: window-plan rule, along/cross (line, circle, stopped truth), path ratio, speed diagnostics, guard, sandbox windows (GNSS really hidden, truncation exact, baselines, vehicle_dr beats hold) |
+| `backend/tests/test_eval_e0.py` | 32 tests: window-plan rule, along/cross (line, circle, stopped truth), path ratio, speed diagnostics, guard, sandbox windows (GNSS really hidden, truncation exact, baselines, vehicle_dr beats hold), launch-from-stop flag, dev_eval helpers |
+| `backend/dev_eval.py` | **development-window harness (registry v2)**: scores a `VDRParams` on the S3b dev windows (11) + S2 dev windows (861, worker pool, below-normal priority) + S3b mini / event / coverage / launch-from-stop; hold and const-v on the same windows. `python backend/dev_eval.py --name X --set key=value` or several `--config "NAME\|key=value\|..."` in one pool; `--workers 4` (each worker holds S2, ~300 MB — the machine is shared, 30 workers ran out of memory), `--s2-stride 4` for screening runs |
+| `backend/check_alignment.py` | B0 time-alignment check for any drive (phone GNSS vs VBOX, lag scan); `python backend/check_alignment.py S3b S1 S2` |
+| `backend/tests/test_gyro_scale.py` | 17 tests: H1a robust fit / estimator / causality / outage, H1b seven-state filter, sandbox pass criteria P1-P3 |
 | `backend/tune_vehicle_dr.py` | `Evaluator` (S3b mini-outages, ~0.4 s per run), `grid_search` (coverage-constrained rule + LOO), `summarize` |
 | `backend/mount_angle.py` | B2 calibration: phone horizontal frame -> vehicle forward angle, two criteria; `python backend/mount_angle.py S3b S1 --windows 30` |
 | `backend/sim_drive.py` | synthetic drive with known truth (`simulate`, `SimConfig`, `default_route`, `long_route`, `multi_stop_route`) |
@@ -45,7 +48,9 @@ Diagnostic one-off scripts lived in a session scratchpad and are gone; everythin
 (3 consecutive position rejections -> next fix accepted ungated, logged `pos_forced`; **course and speed have no failsafe**), IMU-only standstill -> ZUPT + ZARU, psi frozen while stationary,
 GNSS update order speed -> course -> position, honest propagation of data holes (dt > 1 s), B3b launch calibration with turn compensation and **replay only** (`aided_max_s = 0`).
 
-**OFF (default False; code + sandbox tests kept):** `use_centripetal` (B3c, failed on S3b), `use_fixed_mount` (B3d, no benefit on S1). Accel-integrated speed (`aided_max_s > 0`) is off because it hurt on S3b.
+**OFF (default False; code + sandbox tests kept):** `use_centripetal` (B3c, failed on S3b), `use_fixed_mount` (B3d, no benefit on S1), **`use_gyro_scale` (H1a) and `use_gyro_state` (H1b): correct on the sandbox, no benefit on real data because the real gyro scale is ~1.0**. Accel-integrated speed (`aided_max_s > 0`) is off because it hurt on S3b.
+H1 knobs: `gs_window_s` 300, `gs_min_pairs` 5, `gs_k_min/max` 0.7 / 1.4, `gs_min_speed` 3, `gs_min_dcourse_deg` 20, `gs_max_pair_s` 15, `gs_max_x_rad` 2.8, `gs_latency_s` 0, `gs_fit` theilsen, `gs_gate_on` course, `gs_deadband` 0; `p0_sg` 0.10, `rw_sg` 1e-4.
+New result keys: `gyro_scale_k / _log / _pairs` (H1a), `gyro_state_log` (H1b), `gyro_bias` (b_g per row, diagnostics).
 
 | group | defaults |
 |---|---|
@@ -869,3 +874,37 @@ A full evaluation takes ~160 s (S2 dominates). 32 tests in `test_eval_e0.py` (la
 S3b numbers are identical to the E0 report (harness check). **New facts from S2:** vehicle_dr already beats hold clearly on S2 (median end 152 vs 369 m, p90 491 vs 869 m), i.e. "vehicle_dr ≈ hold" (E0) is a property of S3b's slow stop-and-go driving where
 "stay put" is a strong baseline; on S2 the error is along-track dominated (|along| 98 vs |cross| 67 m at the end), the opposite of S3b (|cross| 122 vs |along| 77). The two development drives therefore stress different error components.
 The launch-from-stop windows (n = 138 pooled; S3b contributes few) are much harder than average for every method (hold 265, const-v 252, vehicle_dr 151 m median end).
+
+
+# H1 — gyro scale calibration (2026-09-26, registry v2). RESULT: the hypothesis is REFUTED on real data; H1a and H1b are correct on the sandbox and stay OFF
+**Sandbox first (`sim_drive long_route`, 4 seeds, all valid 60 s windows; criteria fixed in `tests/test_gyro_scale.py` before any real-data number):**
+P1 estimated scale within 5 % after 200 s at true scale 1.3; P2 median window end error within 10 % of the oracle (gyro column / true scale); P3 at scale 1.0 no worse than the default by more than 3 %.
+Sensitivity reproduced with our own code: scale 1.3 raises the median end error 133.6 / 137.0 / 129.5 / 123.5 (scale 1.0) -> 185.5 / 182.9 / 182.5 / 198.5 m (+39 / +34 / +41 / +61 % vs oracle), cross-track 75-91 -> 111-127 m; the oracle restores it.
+| variant (sandbox, 4 seeds) | estimated scale after 200 s (true 1.3) | P2: scale 1.3 vs oracle, all windows | P3: scale 1.0 vs default | verdict |
+|---|---|---|---|---|
+| H1a spec: W 300, min 5 pairs | 1.309 / 1.312 / 1.267 / 1.313 (P1 pass) | +0.4 / +10.5 / +9.1 / +10.3 % (windows starting >= 200 s: within 1.4 %) | +0.3 / -0.7 / +4.5 / -0.1 % | P1 pass; P2 misses the strict all-windows 10 % on 2 seeds by 0.3-0.5 pp (early windows precede the 5th turn pair); P3 fails on seed 2 (+4.5 %: at scale 1.0 the small-sample k wandered to 1.02-1.04 from 3-4 deg GNSS-course noise) |
+| H1a W 120 | 1.13-1.22 (only 3-4 qualifying turns fit in 120 s: k stays 1) | – | – | fails P1 |
+| H1a W 300, min 3 pairs + deadband 0.05 (`gs_deadband`: k applied only if abs(k-1) > 0.05) | same | +0.4 / +2.8 / +4.2 / +0.1 % | 0.0 / 0.0 / 0.0 / 0.0 % | passes P1-P3 (deadband added after seeing the P3 miss; documented as a design choice) |
+| Theil-Sen vs Huber; course-gate vs gyro-gate | identical within 0.005 | – | – | Theil-Sen + course gate (the spec) kept |
+| **H1b: 7th EKF state s_g, psi_dot = (1 + s_g)(omega - b_g), prior 0.1** | **1.279 / 1.272 / 1.277 / 1.282** (est. scale = 1/(1+s_g); ~100 s to converge) | **+1.3 / +0.4 / +2.4 / -3.8 %** | **0.0 / +0.9 / +0.6 / -0.1 %** (scale estimate 0.985-0.995) | **passes P1-P3 with no deadband; better than H1a on the sandbox** |
+
+**Real data — the estimated scale is ~1.0 everywhere.** Final / over-time values (scale = 1/k):
+* S3b, H1a (W = 300): k after each fix (t: k [pairs]) 157: 0.992 [5], 289: 1.024, 325: 0.992, 433: 1.024, 577: 0.932 [13], 649: 1.045, 685: 1.026; final k = 1.026 (W = all: 0.992). 22 accepted turn pairs, correlation gyro integral vs GNSS course change **0.998**, whole-drive fits Theil-Sen 0.992 / Huber 0.998 / LS 1.002.
+  H1b: 0.98-1.04 over the drive, final 1.016 (std of s_g 0.016).
+* S2: H1a final k 1.000 (W 300) / 0.997 (all), 271 pairs, whole-drive fits 0.997 / 0.995 / 0.987, corr 0.991; H1b 0.98-1.00 (0.90-1.14 only in the first 600 s), final 0.982.
+* S1 (secondary): H1a final 1.000 / 0.985, 156 pairs, fits 0.985-0.989, corr 0.997; H1b 0.987-0.996.
+* **An estimator that does not use GNSS course at all agrees:** regressing the gyro vertical rate on VBOX's yaw rate at moving samples (scoring reference only) gives scale 1.019 (t < 200 s) / 1.013 (whole S3b), corr 0.954.
+**Why A2 said 1.29 (S3b) / 0.94 (S1):** re-running the A2 computation (all consecutive-fix pairs with both speeds > 3 m/s, raw gyro integral, no bias removal) gives 1.277 / 0.926, but the S3b slope is produced by two wrap-ambiguous pairs at t = 29 s and 40 s where
+the gyro integrates -420 deg and -405 deg (more than a full revolution: a loop / roundabout) while the GNSS course, seen only at the two fixes, changed -57 deg and -50 deg. Excluding pairs with abs(integrated gyro) >= 2.8 rad (2 of 56 on S3b, 1 of 407 on S1) the A2 slope becomes 0.992 (corr 0.973) on S3b and 0.985 (corr 0.997) on S1.
+The A2 "scale" was an aliasing artefact; the gyro scale of this phone is 1.00 +/- 0.03 on S3b, S2 and S1.
+
+**Real-data effect on the development windows** (median end / p90 end / median |cross| / median |along|, m; baseline S2 full list 152.3 / 490.9 / 66.9 / 98.0; S3b baseline 161.5 / 214.2 / 121.9 / 76.5):
+| H1a variant (full S2 list, n = 861) | S3b windows | S2 windows | S3b mini | event mean / end / ratio |
+|---|---|---|---|---|
+| W 120, min 5 | 161.5 / 214.2 / 121.9 / 76.5 (identical) | 157.2 / 502.2 / 67.7 / 100.9 | 21.92 | 63.44 / 143.53 / 0.46 |
+| W 300, min 5 (spec) | identical | 155.8 / 492.2 / 67.6 / 100.7 | 21.92 | 63.44 / 143.53 / 0.46 |
+| W all, min 5 | identical | 156.2 / 480.8 / 65.9 / 99.6 | 21.92 | 63.44 / 143.53 / 0.46 |
+| W 300, min 5, deadband 0.05 | identical | 155.8 / 477.0 / 67.2 / 97.4 | 21.93 | 64.35 / 145.89 / 0.46 (= baseline) |
+| W 300, min 3, deadband 0.05 | identical | 156.6 / 477.0 / 67.7 / 99.7 | 21.93 | 64.35 / 145.89 / 0.46 |
+On S3b no pair set is large enough before 130 s to change k, so the dev windows are bit-identical; on S2 every variant moves the median end by +2 to +3 % (inside the 5 % noise band, not better). By the standing rule H1a is switched OFF and kept.
+H1b (S2 stride-4 screening subset, n = 216, baseline on the same subset 150.0 / 466.9 / 67.5 / 95.2): S3b 162.3 / 213.4 / 128.1 / 77.1, S2 149.0 / 449.1 / 65.7 / 95.4 -> no change (+0.5 % / -0.7 %); OFF, kept.

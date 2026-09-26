@@ -51,8 +51,11 @@ def _task(args):
     return co.window_benchmark(s, truth, starts, params=params, run_kw=run_kw)
 
 
-def window_rows(drive, params, pool=None, workers=16, run_kw=None):
+def window_rows(drive, params, pool=None, workers=4, run_kw=None, stride=1):
+    """stride > 1 = screening run: every stride-th registered window of a drive with more than 24 windows (S2). S3b is never thinned."""
     starts = load_dev(drive)[4] if pool is None else _starts_only(drive)
+    if len(starts) > 24:
+        starts = starts[::stride]
     if pool is None or len(starts) <= 24:
         return _task((drive, starts, params, run_kw))
     k = workers * 3
@@ -98,8 +101,8 @@ def summ(rows, who):
                 med_cov=float(np.nanmedian(g("inside"))) if who == "vdr" else float("nan"))
 
 
-def evaluate(params, pool=None, drives=DEV_DRIVES, workers=16, run_kw=None, extras=True):
-    out = dict(windows={d: window_rows(d, params, pool, workers, run_kw) for d in drives})
+def evaluate(params, pool=None, drives=DEV_DRIVES, workers=4, run_kw=None, extras=True, stride=1):
+    out = dict(windows={d: window_rows(d, params, pool, workers, run_kw, stride) for d in drives})
     if extras and "S3b" in drives:
         out.update(s3b_extras(params, run_kw))
     pooled = [r for d in drives for r in out["windows"][d]]
@@ -112,12 +115,15 @@ def _f(x, w=6, d=1):
     return f"{x:{w}.{d}f}" if np.isfinite(x) else " " * (w - 1) + "-"
 
 
-def print_table(name, out, drives=DEV_DRIVES):
+def print_table(name, out, drives=DEV_DRIVES, baselines=True):
     """Compact plan-table rows: hold, const-v (same windows) and the filter."""
     hdr = "step | " + " | ".join(f"{d} dev windows: med end / p90 end / med |cross| / med |along|" for d in drives)
     hdr += " | pooled med end | S3b mini mean | launch-from-stop med end (n) | event mean / end / path ratio | 1σ mini / S3b-win / S2-win"
-    print(hdr)
+    if baselines:
+        print(hdr)
     for who, label in (("hold", "hold-last-fix"), ("cv", "const-v"), ("vdr", name)):
+        if who != "vdr" and not baselines:
+            continue
         cells = []
         for d in drives:
             s = summ(out["windows"][d], who)
@@ -146,26 +152,43 @@ def parse_set(params, items):
     return replace(params, **upd)
 
 
-def open_pool(workers=16):
-    return ProcessPoolExecutor(max_workers=workers)
+def _lower_priority():
+    """Workers run at below-normal priority so an interactive machine stays responsive (Windows; no-op elsewhere)."""
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x4000)   # BELOW_NORMAL_PRIORITY_CLASS
+    except Exception:
+        pass
+
+
+def open_pool(workers=4):
+    return ProcessPoolExecutor(max_workers=workers, initializer=_lower_priority)
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--name", default="vehicle_dr")
     ap.add_argument("--set", action="append", help="VDRParams override, e.g. --set turn_noise=0.3 (repeatable)")
+    ap.add_argument("--config", action="append", help="NAME|key=value|key=value ... (repeatable): several parameter sets evaluated with one worker pool; "
+                                                      "overrides are applied on top of --set")
     ap.add_argument("--drives", nargs="+", default=list(DEV_DRIVES))
-    ap.add_argument("--workers", type=int, default=16)
+    ap.add_argument("--workers", type=int, default=4, help="worker processes (each holds S2: ~300 MB; keep small on a shared machine)")
+    ap.add_argument("--s2-stride", type=int, default=1, help="screening: use every k-th registered S2 window (1 = the full 861-window list)")
     ap.add_argument("--json", default=None, help="write the summary numbers to this file")
     a = ap.parse_args()
-    p = parse_set(VDRParams(), a.set)
-    t0 = time.time()
+    base_p = parse_set(VDRParams(), a.set)
+    cfgs = [(c.split("|")[0], parse_set(base_p, c.split("|")[1:])) for c in a.config] if a.config else [(a.name, base_p)]
+    drives = tuple(a.drives)
+    dump = {}
     with open_pool(a.workers) as pool:
-        out = evaluate(p, pool, tuple(a.drives), a.workers)
-    print_table(a.name, out, tuple(a.drives))
-    print(f"({time.time() - t0:.0f} s; S3b windows n={len(out['windows'].get('S3b', []))}, S2 windows n={len(out['windows'].get('S2', []))}, "
-          f"launch-from-stop windows n={len(out['launch'])})")
+        for i, (nm, p) in enumerate(cfgs):
+            t0 = time.time()
+            out = evaluate(p, pool, drives, a.workers, stride=a.s2_stride)
+            print_table(nm, out, drives, baselines=(i == 0))
+            print(f"  ({time.time() - t0:.0f} s; S3b n={len(out['windows'].get('S3b', []))}, S2 n={len(out['windows'].get('S2', []))}"
+                  f"{' (stride ' + str(a.s2_stride) + ' screening)' if a.s2_stride > 1 else ''}, "
+                  f"launch-from-stop n={len(out['launch'])})", flush=True)
+            dump[nm] = dict(summary={d: {w: summ(out['windows'][d], w) for w in ('vdr', 'cv', 'hold')} for d in drives},
+                            **{k: out[k] for k in ('mini_mean', 'mini_cov', 'event') if k in out})
     if a.json:
-        keep = {d: {w: summ(out['windows'][d], w) for w in ('vdr', 'cv', 'hold')} for d in a.drives}
-        json.dump(dict(name=a.name, set=a.set, summary=keep, **{k: out[k] for k in ('mini_mean', 'mini_cov', 'event') if k in out}),
-                  open(a.json, "w"), indent=1)
+        json.dump(dump, open(a.json, "w"), indent=1)

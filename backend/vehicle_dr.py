@@ -122,6 +122,25 @@ class VDRParams:
     fixed_gate_diff_deg: float = 30.0  # ... and agree within this many degrees
     sigma_lat: float = 0.8           # m/s²   signed centripetal a_lat = v*omega measurement noise
     sigma_ba_rest: float = 0.15      # m/s²   forward-bias measurement at a standstill (a_h . u)
+    # H1a — causal gyro-scale calibration: regress the GNSS course change between consecutive NEW fixes on the gyro integrated
+    # over the same interval (past pairs only); psi_dot = k * (omega - b_g) with k = fitted slope y ~ k x. See AERIS_FINDINGS.md (H1).
+    use_gyro_scale: bool = False
+    gs_window_s: float = 300.0       # W: only pairs that ended within the last W seconds (inf = all past pairs)
+    gs_min_pairs: int = 5            # fewer pairs -> k = 1
+    gs_k_min: float = 0.7            # a fitted k outside [k_min, k_max] is rejected -> k = 1
+    gs_k_max: float = 1.4
+    gs_min_speed: float = 3.0        # m/s: both fixes of a pair (the phone course is only meaningful when moving)
+    gs_min_dcourse_deg: float = 20.0  # only turns: |course change| (gs_gate_on = "course") or |integrated gyro| (= "gyro") above this
+    gs_max_pair_s: float = 15.0      # consecutive fixes further apart are not paired (data hole / hidden fixes)
+    gs_max_x_rad: float = 2.8        # |integrated gyro| above this: the wrapped course change is ambiguous -> pair skipped
+    gs_latency_s: float = 0.0        # L: gyro integral over [t_a - L, t_b - L] (GNSS latency; 0 until I1a)
+    gs_fit: str = "theilsen"         # "theilsen" = x^2-weighted median of y/x (robust, no tuning constant) or "huber" (IRLS through the origin)
+    gs_gate_on: str = "course"       # which variable the turn gate uses: "course" (spec) or "gyro" (no selection bias on the noisy variable)
+    gs_deadband: float = 0.0         # a fitted k with |k - 1| <= deadband is not applied (k = 1): a small-sample fit of a true scale of 1.0 wanders by a few %
+    # H1b — EKF alternative: gyro scale error as a 7th state, psi_dot = (1 + s_g) * (omega - b_g); observable through the course / position updates
+    use_gyro_state: bool = False
+    p0_sg: float = 0.10              # prior std of s_g
+    rw_sg: float = 1.0e-4            # 1/sqrt(s): tiny random walk of s_g
     # initial covariance (std devs)
     p0_pos: float = 5.0
     p0_psi: float = np.pi
@@ -143,6 +162,30 @@ def _causal_window_stats(x, w):
     mean = (cs[idx + 1] - cs[lo]) / cnt
     var = np.maximum((cs2[idx + 1] - cs2[lo]) / cnt - mean ** 2, 0.0)
     return mean, var
+
+
+def fit_scale_through_origin(x, y, method="theilsen"):
+    """Robust slope k of y ~ k * x through the origin. x = integrated gyro over a fix interval, y = GNSS course change.
+    theilsen: x^2-weighted median of the ratios y/x (weights make it the robust analogue of least squares);
+    huber:    iteratively re-weighted least squares, Huber threshold 1.345 * max(1.4826 * MAD, 0.05 rad)."""
+    x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+    if method == "theilsen":
+        r, w = y / x, x * x
+        o = np.argsort(r)
+        cw = np.cumsum(w[o])
+        return float(r[o][int(np.searchsorted(cw, 0.5 * cw[-1]))])
+    if method == "huber":
+        k = float(np.sum(x * y) / np.sum(x * x))
+        for _ in range(30):
+            e = y - k * x
+            c = 1.345 * max(1.4826 * np.median(np.abs(e - np.median(e))), 0.05)
+            wt = np.where(np.abs(e) <= c, 1.0, c / np.maximum(np.abs(e), 1e-12))
+            k_new = float(np.sum(wt * x * y) / np.sum(wt * x * x))
+            if abs(k_new - k) < 1e-6:
+                return k_new
+            k = k_new
+        return k
+    raise ValueError(method)
 
 
 def calibrate_fixed_mount(s_df, p: VDRParams):
@@ -216,19 +259,23 @@ def evaluate_launch(ax, ay, wv, bg, dts, i_rel, i_now, b_h, p: VDRParams):
 class _EKF:
     def __init__(self, p: VDRParams, v0: float):
         self.p = p
-        self.x = np.array([0.0, 0.0, 0.0, v0, 0.0, 0.0])
-        self.P = np.diag([p.p0_pos ** 2, p.p0_pos ** 2, p.p0_psi ** 2, p.p0_v ** 2, p.p0_bg ** 2, p.p0_ba ** 2])
+        self.nx = 7 if p.use_gyro_state else 6          # H1b adds the gyro scale state s_g as index 6
+        self.x = np.array([0.0, 0.0, 0.0, v0, 0.0, 0.0] + ([0.0] if self.nx == 7 else []))
+        self.P = np.diag([p.p0_pos ** 2, p.p0_pos ** 2, p.p0_psi ** 2, p.p0_v ** 2, p.p0_bg ** 2, p.p0_ba ** 2]
+                         + ([p.p0_sg ** 2] if self.nx == 7 else []))
         self.psi_ready = False
         self.consec_pos_rej = 0
         self.gate_log = []
         self.counts = {"pos": [0, 0], "speed": [0, 0], "course": [0, 0], "cent": [0, 0], "lat": [0, 0]}   # [accepted, rejected]
 
     # ── time update ───────────────────────────────────────────────────────────
-    def predict(self, dt, omega, stationary, a_fwd=None):
-        """a_fwd: forward acceleration (phone accel projected on the launch axis) — None means v is held."""
+    def predict(self, dt, omega, stationary, a_fwd=None, k_gyro=1.0):
+        """a_fwd: forward acceleration (phone accel projected on the launch axis) — None means v is held.
+        k_gyro: H1a gyro-scale correction (psi_dot = k_gyro * (omega - b_g)); 1.0 = uncorrected."""
         p, x = self.p, self.x
         psi, v, bg = x[2], x[3], x[4]
-        w = 0.0 if stationary else (omega - bg)          # a stopped vehicle is not turning
+        sc = k_gyro if self.nx == 6 else k_gyro * (1.0 + x[6])   # H1b: psi_dot = (1 + s_g) * (omega - b_g)  (times the H1a k)
+        w = 0.0 if stationary else sc * (omega - bg)             # a stopped vehicle is not turning
         psi_m = psi + 0.5 * w * dt
         c, s = np.cos(psi_m), np.sin(psi_m)
         x[0] += v * c * dt
@@ -237,20 +284,26 @@ class _EKF:
         aided = a_fwd is not None and not stationary
         if aided:
             x[3] = max(0.0, v + (a_fwd - x[5]) * dt)
-        F = np.eye(6)
+        F = np.eye(self.nx)
         F[0, 2] = -v * s * dt; F[0, 3] = c * dt
         F[1, 2] = v * c * dt;  F[1, 3] = s * dt
         if not stationary:
-            F[0, 4] = v * s * dt * dt / 2.0
-            F[1, 4] = -v * c * dt * dt / 2.0
-            F[2, 4] = -dt
+            F[0, 4] = sc * v * s * dt * dt / 2.0
+            F[1, 4] = -sc * v * c * dt * dt / 2.0
+            F[2, 4] = -sc * dt
+            if self.nx == 7:                                     # d psi / d s_g = k (omega - b_g) dt, and its effect on the position
+                dw = k_gyro * (omega - bg)
+                F[2, 6] = dw * dt
+                F[0, 6] = -0.5 * v * s * dw * dt * dt
+                F[1, 6] = 0.5 * v * c * dw * dt * dt
         if aided:
             F[3, 5] = -dt
         q_psi = (p.sigma_gyro * dt) ** 2 + (p.turn_noise * abs(w) * dt) ** 2
         rw_v = p.rw_v_aided if aided else p.rw_v
-        Q = np.diag([p.rw_pos ** 2 * dt, p.rw_pos ** 2 * dt, q_psi,
-                     rw_v ** 2 * dt, p.rw_bg ** 2 * dt, p.rw_ba ** 2 * dt])
-        self.P = F @ self.P @ F.T + Q
+        q = [p.rw_pos ** 2 * dt, p.rw_pos ** 2 * dt, q_psi, rw_v ** 2 * dt, p.rw_bg ** 2 * dt, p.rw_ba ** 2 * dt]
+        if self.nx == 7:
+            q.append(p.rw_sg ** 2 * dt)
+        self.P = F @ self.P @ F.T + np.diag(q)
 
     # ── measurement update (Joseph form) ──────────────────────────────────────
     def update(self, y, H, R, dof, kind, t, gated=True):
@@ -267,7 +320,7 @@ class _EKF:
         K = P @ H.T @ Sinv
         self.x = self.x + K @ y
         self.x[2] = wrap_pi(self.x[2])
-        I_KH = np.eye(6) - K @ H
+        I_KH = np.eye(self.nx) - K @ H
         self.P = I_KH @ P @ I_KH.T + K @ R @ K.T
         if kind in self.counts:
             self.gate_log.append((float(t), kind, d2, True))
@@ -341,6 +394,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
     stationary = False
     t_out, pos_out, v_out, hd_out, cov_tr, cov_m, st_out, flags = [], [], [], [], [], [], [], []
     aided_out = []
+    bg_out = []                                     # filter's gyro-bias estimate per row (diagnostics)
     dts = np.r_[0.1, np.diff(ts)]
     dts = np.where((dts > 0) & (dts <= 1.0), dts, 0.1)
     launches = []
@@ -354,6 +408,13 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
     REST_DELAY = 12                                 # rest baseline uses samples older than 1.2 s
     psi_init_t = None
     zaru_count = 0
+    # H1a gyro-scale calibration state: cum[i] = integral of the UNCORRECTED (omega - b_g) up to row i (0 while stationary,
+    # exactly like psi's propagation); pairs of consecutive usable new fixes -> (t_b, x, y); k = fitted slope, 1.0 = uncorrected
+    k_gs = 1.0
+    gs_cum = np.zeros(n)
+    gs_prev = None                                  # (t, cum at t - L, course psi, speed) of the previous usable new fix
+    gs_pairs, gs_log = [], []
+    sg_log = []                                     # H1b: (t of new fix, s_g, std of s_g)
     sigma_fix0 = max(acc[first], p.gnss_min_sigma) if np.isfinite(acc[first]) else 10.0
     ekf.P[0, 0] = ekf.P[1, 1] = sigma_fix0 ** 2
     if np.isfinite(spd[first]) and spd[first] > p.min_course_speed and np.isfinite(brg[first]):
@@ -379,7 +440,8 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
                 a_f = float(ax[i] * u_fwd[0] + ay[i] * u_fwd[1])   # a valid launch axis has priority
             elif fixed_on:
                 a_f = float(ax[i] * u_fixed[0] + ay[i] * u_fixed[1])
-        ekf.predict(dt, omega, stationary, a_f)
+        gs_cum[i] = gs_cum[i - 1] + (0.0 if stationary else (omega - ekf.x[4]) * dt)      # H1a: uncorrected gyro integral
+        ekf.predict(dt, omega, stationary, a_f, k_gs)
 
         # ── stationarity (IMU only) ──────────────────────────────────────────
         v_est = ekf.x[3]
@@ -439,9 +501,29 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         if usable and stationary and np.isfinite(spd[i]) and spd[i] > p.gnss_moving_speed:
             stationary = False                                   # GNSS says we are moving: the IMU detector was wrong
             ekf.P[3, 3] = max(ekf.P[3, 3], p.launch_sigma_v ** 2)
+        if usable and p.use_gyro_scale:
+            # H1a: pair this fix with the previous usable new fix (past data only) and refit k = slope of y ~ k x
+            has_course = bool(np.isfinite(spd[i]) and spd[i] > p.gs_min_speed and np.isfinite(brg[i]))
+            cum_t = float(np.interp(t - p.gs_latency_s, ts[:i + 1], gs_cum[:i + 1]))
+            psi_c = float(bearing_to_psi(brg[i])) if has_course else float("nan")
+            if has_course and gs_prev is not None and (t - gs_prev[0]) <= p.gs_max_pair_s:
+                y = float(wrap_pi(psi_c - gs_prev[2]))
+                xg = cum_t - gs_prev[1]
+                gate_v = abs(y) if p.gs_gate_on == "course" else abs(xg)
+                if gate_v > np.radians(p.gs_min_dcourse_deg) and abs(xg) < p.gs_max_x_rad and abs(xg) > 1e-3:
+                    gs_pairs.append((t, xg, y))
+            gs_prev = (t, cum_t, psi_c, float(spd[i])) if has_course else None       # a fix without a course breaks the chain
+            cand = [(a, b) for (tb, a, b) in gs_pairs if tb > t - p.gs_window_s]
+            k_new = 1.0
+            if len(cand) >= p.gs_min_pairs:
+                k_fit = fit_scale_through_origin([a for a, _ in cand], [b for _, b in cand], p.gs_fit)
+                if p.gs_k_min <= k_fit <= p.gs_k_max and abs(k_fit - 1.0) > p.gs_deadband:
+                    k_new = k_fit
+            k_gs = k_new
+            gs_log.append((float(t), float(k_gs), len(cand)))
         if usable:
             if np.isfinite(spd[i]):
-                H1 = np.zeros((1, 6)); H1[0, 3] = 1.0
+                H1 = np.zeros((1, ekf.nx)); H1[0, 3] = 1.0
                 ok = ekf.update(np.array([spd[i] - ekf.x[3]]), H1, np.array([[p.sigma_gnss_speed ** 2]]), 1, "speed", t)
                 ekf.counts["speed"][0 if ok else 1] += 1
 
@@ -451,7 +533,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
                     ekf.init_psi(psi_meas)
                     psi_init_t = float(t)
                 else:
-                    H1 = np.zeros((1, 6)); H1[0, 2] = 1.0
+                    H1 = np.zeros((1, ekf.nx)); H1[0, 2] = 1.0
                     ok = ekf.update(np.array([float(wrap_pi(psi_meas - ekf.x[2]))]), H1,
                                     np.array([[np.radians(p.sigma_gnss_course_deg) ** 2]]), 1, "course", t)
                     ekf.counts["course"][0 if ok else 1] += 1
@@ -459,7 +541,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
             # position last: the direct speed / course measurements are gated before a position update
             # has had the chance to narrow their variances through the cross-covariance
             sig = max(acc[i], p.gnss_min_sigma) if np.isfinite(acc[i]) else 10.0
-            H = np.zeros((2, 6)); H[0, 0] = 1.0; H[1, 1] = 1.0
+            H = np.zeros((2, ekf.nx)); H[0, 0] = 1.0; H[1, 1] = 1.0
             y = np.array([fixE[i] - ekf.x[0], fixN[i] - ekf.x[1]])
             gated = ekf.consec_pos_rej < p.max_consecutive_pos_rejects
             ok = ekf.update(y, H, np.eye(2) * sig ** 2, 2, "pos", t, gated=gated)
@@ -471,12 +553,14 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
             else:
                 ekf.counts["pos"][1] += 1
                 ekf.consec_pos_rej += 1
+            if ekf.nx == 7:
+                sg_log.append((float(t), float(ekf.x[6]), float(np.sqrt(max(ekf.P[6, 6], 0.0)))))     # H1b: s_g after this fix
 
         # ── ZUPT / ZARU ──────────────────────────────────────────────────────
         if stationary:
-            H1 = np.zeros((1, 6)); H1[0, 3] = 1.0
+            H1 = np.zeros((1, ekf.nx)); H1[0, 3] = 1.0
             ekf.update(np.array([-ekf.x[3]]), H1, np.array([[p.sigma_zupt ** 2]]), 1, "zupt", t, gated=False)
-            H1 = np.zeros((1, 6)); H1[0, 4] = 1.0
+            H1 = np.zeros((1, ekf.nx)); H1[0, 4] = 1.0
             ekf.update(np.array([wv[i] - ekf.x[4]]), H1, np.array([[p.sigma_zaru ** 2]]), 1, "zaru", t, gated=False)
             zaru_count += 1
 
@@ -489,7 +573,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
                 z = float(np.linalg.norm(a_vec))
                 v = float(ekf.x[3])
                 h = float(np.sqrt((v * ws) ** 2 + p.cent_res ** 2))
-                Hc = np.zeros((1, 6))
+                Hc = np.zeros((1, ekf.nx))
                 Hc[0, 3] = v * ws * ws / h
                 Hc[0, 4] = (-v * v * ws / h) if p.cent_bg_coupling else 0.0
                 ok = ekf.update(np.array([z - h]), Hc, np.array([[p.sigma_cent ** 2]]), 1, "cent", t)
@@ -498,7 +582,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         # ── B3d: with a trusted fixed mount ──────────────────────────────────
         if fixed_on:
             if stationary and i >= 5 and i % 5 == 0:               # a_fwd ~ b_a at a standstill
-                Hb = np.zeros((1, 6)); Hb[0, 5] = 1.0
+                Hb = np.zeros((1, ekf.nx)); Hb[0, 5] = 1.0
                 zb = float(np.array([ax[i - 4:i + 1].mean(), ay[i - 4:i + 1].mean()]) @ u_fixed)
                 ekf.update(np.array([zb - ekf.x[5]]), Hb, np.array([[p.sigma_ba_rest ** 2]]), 1, "ba_rest", t, gated=False)
             elif (not stationary) and i >= 15 and i % p.cent_every == 0 and ekf.x[3] > p.cent_v_min:
@@ -506,7 +590,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
                 ws_prev = float(wv[i - 14:i - 9].mean() - ekf.x[4])
                 if abs(ws) > p.cent_w_min and abs(ws - ws_prev) < p.cent_steady:
                     a_vec = np.array([ax[i - 4:i + 1].mean(), ay[i - 4:i + 1].mean()]) - b_h_last
-                    Hl = np.zeros((1, 6)); Hl[0, 3] = ws           # a_lat = v * omega (signed: left turn +)
+                    Hl = np.zeros((1, ekf.nx)); Hl[0, 3] = ws           # a_lat = v * omega (signed: left turn +)
                     ok = ekf.update(np.array([float(a_vec @ up_fixed) - ekf.x[3] * ws]), Hl,
                                     np.array([[p.sigma_lat ** 2]]), 1, "lat", t)
                     ekf.counts["lat"][0 if ok else 1] += 1
@@ -522,6 +606,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         cov_m.append([round(float(P2[0, 0]), 4), round(float(P2[1, 1]), 4), round(float(P2[0, 1]), 4)])
         st_out.append(bool(stationary))
         aided_out.append(bool(aided))
+        bg_out.append(float(ekf.x[4]))
         flags.append("outage" if in_outage else "healthy")
 
     return {
@@ -544,6 +629,11 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         "launches": launches,
         "mount_calibration": mount_cal,
         "gate_log": ekf.gate_log,
+        "gyro_bias": bg_out,                 # b_g per row (rad/s), diagnostics
+        "gyro_scale_k": k_gs,                # H1a: final correction factor (1.0 when off / not yet calibrated)
+        "gyro_scale_log": gs_log,            # H1a: (t of new fix, k after that fix, pairs in the window)
+        "gyro_scale_pairs": gs_pairs,        # H1a: (t_b, x = integrated gyro, y = GNSS course change) of every accepted pair
+        "gyro_state_log": sg_log,            # H1b: (t, s_g, std) after every usable new fix; psi_dot = (1 + s_g)(omega - b_g)
         "gate_counts": {k: {"accepted": a, "rejected": r} for k, (a, r) in ekf.counts.items()},
         "psi_init_time": psi_init_t,
         "params": p,
