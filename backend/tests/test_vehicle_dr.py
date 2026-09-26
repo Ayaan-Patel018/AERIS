@@ -11,7 +11,7 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from sim_drive import simulate, SimConfig, default_route, wrap_pi, enu_to_latlon, LAT0, LON0
+from sim_drive import simulate, SimConfig, default_route, multi_stop_route, wrap_pi, enu_to_latlon, LAT0, LON0
 
 LOADER_COLUMNS = [
     "timestamp_s", "gps_lat", "gps_lon", "gps_alt_m", "gps_speed_ms", "gps_heading_deg",
@@ -256,6 +256,139 @@ class TestVehicleDRCore(unittest.TestCase):
             res = self.runs[sd][2]
             self.assertTrue(res["yaw_observable"])
             self.assertLessEqual(res["psi_init_time"], 9.0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B3b — launch calibration (mount-free forward axis)
+# ─────────────────────────────────────────────────────────────────────────────
+from dataclasses import replace as _replace
+
+
+def _stop_spans(tr):
+    st = tr.stationary.values.astype(int)
+    e = np.flatnonzero(np.diff(np.r_[0, st, 0]))
+    t = tr.timestamp_s.values
+    return [(t[a], t[min(b, len(t) - 1)]) for a, b in zip(e[::2], e[1::2])]
+
+
+def _launch_errors(res, tr):
+    """(truth mount - estimated phi) in degrees for every accepted launch, using the mount at the release time."""
+    out = []
+    for L in res["launches"]:
+        if L.get("accepted"):
+            k = min(int(round(L["t_release"] / 0.1)), len(tr) - 1)
+            out.append(float(np.degrees(vdr_wrap(np.radians(L["phi_deg"] - tr.mount_deg.values[k])))))
+    return out
+
+
+class TestLaunchCalibration(unittest.TestCase):
+    """B3b. Sandbox pass criteria: phi recovered within 10 deg on straight and turning launches, also after an abrupt
+    mount change; launches are logged; the step does not make the multi-stop route worse."""
+
+    @staticmethod
+    def _cfg(turn, change, seed=1):
+        base = SimConfig(seed=seed, mount_deg=-50.0, v0=0.0, route=multi_stop_route(turn))
+        if not change:
+            return base
+        _, tr0 = simulate(base)
+        sp = _stop_spans(tr0)
+        return _replace(base, mount_changes=(((sp[1][0] + sp[1][1]) / 2.0, 100.0),))   # phone moved DURING the 2nd stop
+
+    def _run(self, turn, change, **kw):
+        s, tr = simulate(self._cfg(turn, change))
+        res = vehicle_dr.run_pipeline(s, None, params=_replace(vehicle_dr.VDRParams(), **kw))
+        return s, tr, res
+
+    def test_straight_launches_recover_phi_within_10_deg(self):
+        s, tr, res = self._run(False, False)
+        errs = _launch_errors(res, tr)
+        self.assertGreaterEqual(len(errs), 4, res["launches"])
+        self.assertLess(max(abs(e) for e in errs), 10.0, errs)
+
+    def test_turning_launches_recover_phi_within_10_deg(self):
+        s, tr, res = self._run(True, False)
+        errs = _launch_errors(res, tr)
+        self.assertGreaterEqual(len(errs), 4, res["launches"])
+        self.assertLess(max(abs(e) for e in errs), 10.0, errs)
+
+    def test_phi_recovered_after_an_abrupt_mount_change(self):
+        for turn in (False, True):
+            s, tr, res = self._run(turn, True)
+            errs = _launch_errors(res, tr)
+            self.assertGreaterEqual(len(errs), 4)
+            self.assertLess(max(abs(e) for e in errs), 10.0, (turn, errs))
+            phis = [L["phi_deg"] for L in res["launches"] if L.get("accepted")]
+            self.assertTrue(min(abs(vdr_wrap(np.radians(q - 100.0))) for q in phis[2:]) < np.radians(10.0))
+
+    def test_strict_mode_refuses_a_turning_launch(self):
+        s, tr, res = self._run(True, False, launch_turn_comp=False)
+        self.assertEqual(len(_launch_errors(res, tr)), 0)
+        self.assertTrue(any(L.get("reason") == "turning" for L in res["launches"]))
+
+    def test_every_launch_is_logged_with_its_evidence(self):
+        s, tr, res = self._run(False, False)
+        self.assertGreaterEqual(len(res["launches"]), 4)
+        for L in res["launches"]:
+            self.assertIn("t_release", L); self.assertIn("accepted", L)
+            if "phi_deg" in L:
+                for k in ("R", "mean_accel", "wmax", "contam", "reason"):
+                    self.assertIn(k, L)
+
+    def test_no_launch_is_invented_without_a_standstill(self):
+        s, tr = simulate(SimConfig(seed=2, v0=8.0, route=[("straight", 400.0, 10.0, 8.0)]))
+        res = vehicle_dr.run_pipeline(s, None)
+        self.assertEqual([L for L in res["launches"] if L.get("accepted")], [])
+
+    def test_bumps_are_not_launches(self):
+        # a stopped car whose phone is jostled: consistent-looking spikes must not be accepted as a launch
+        s, tr = simulate(SimConfig(seed=3, v0=0.0, route=[("stop", 40.0)]))
+        s = s.copy()
+        s.loc[200:203, "linear_accel_x"] += 0.9      # 0.4 s bump
+        res = vehicle_dr.run_pipeline(s, None)
+        self.assertEqual([L for L in res["launches"] if L.get("accepted")], [])
+
+    def test_does_not_make_the_multi_stop_route_worse(self):
+        for turn in (False, True):
+            s, tr = simulate(self._cfg(turn, False))
+            base = vehicle_dr.run_pipeline(s, None, params=_replace(vehicle_dr.VDRParams(), use_launch=False))
+            new = vehicle_dr.run_pipeline(s, None)
+            m0 = np.mean([r["aeris"] for r in check_outage.mini_outage(base, s, tr, 0.0)])
+            m1 = np.mean([r["aeris"] for r in check_outage.mini_outage(new, s, tr, 0.0)])
+            self.assertLessEqual(m1, m0 + 0.5, (turn, m0, m1))
+
+    def test_unlimited_accel_aiding_helps_when_the_mount_is_stable(self):
+        # the machinery itself works: with a stable mount, integrating the forward accel beats holding the speed
+        s, tr = simulate(self._cfg(False, False))
+        held = vehicle_dr.run_pipeline(s, None, params=_replace(vehicle_dr.VDRParams(), use_launch=False))
+        aided = vehicle_dr.run_pipeline(s, None, params=_replace(vehicle_dr.VDRParams(), aided_max_s=float("inf")))
+        m0 = np.mean([r["aeris"] for r in check_outage.mini_outage(held, s, tr, 0.0)])
+        m1 = np.mean([r["aeris"] for r in check_outage.mini_outage(aided, s, tr, 0.0)])
+        self.assertLess(m1, m0)
+
+
+class TestLaunchEvaluator(unittest.TestCase):
+    def test_pure_turn_contamination_is_removed(self):
+        # launch straight at 1.5 m/s^2 along phone axis 30 deg while turning at 0.4 rad/s
+        dt, n = 0.1, 30
+        phi = np.radians(30.0)
+        t = np.arange(n) * dt
+        a_f = np.full(n, 1.5); v = np.cumsum(a_f * dt); w = np.full(n, 0.4)
+        u = np.array([np.cos(phi), np.sin(phi)]); up = np.array([-np.sin(phi), np.cos(phi)])
+        d = np.outer(a_f, u) + np.outer(v * w, up)
+        ax, ay = d[:, 0], d[:, 1]
+        p = vehicle_dr.VDRParams()
+        ev = vehicle_dr.evaluate_launch(ax, ay, w, 0.0, np.full(n, dt), 8, n - 1, np.zeros(2), p)
+        self.assertTrue(ev["accepted"], ev)
+        self.assertLess(abs(np.degrees(vdr_wrap(ev["phi"] - phi))), 3.0)
+        naive = np.arctan2(d.sum(0)[1], d.sum(0)[0])          # what an uncompensated mean would give
+        self.assertGreater(abs(np.degrees(vdr_wrap(naive - phi))), abs(np.degrees(vdr_wrap(ev["phi"] - phi))))
+
+    def test_random_directions_are_rejected(self):
+        rng = np.random.default_rng(0)
+        n = 30
+        d = rng.normal(0, 1.0, (n, 2))
+        ev = vehicle_dr.evaluate_launch(d[:, 0], d[:, 1], np.zeros(n), 0.0, np.full(n, 0.1), 8, n - 1, np.zeros(2), vehicle_dr.VDRParams())
+        self.assertFalse(ev["accepted"])
 
 
 if __name__ == "__main__":

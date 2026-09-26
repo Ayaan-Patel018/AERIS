@@ -54,6 +54,18 @@ def default_route():
     ]
 
 
+def multi_stop_route(turn_launch=False):
+    """Repeated straight / stop cycles (5 launches in ~135 s) for launch-calibration tests. With turn_launch the
+    car pulls away INTO a 90-degree junction turn, as in urban driving."""
+    r = []
+    for k in range(5):
+        r += [("straight", 90.0, 10.0, 0.0), ("stop", 12.0)]
+        if turn_launch:
+            r += [("turn", +90.0 if k % 2 == 0 else -90.0, 9.0, 4.0)]
+    r += [("straight", 60.0, 10.0, 0.0)]
+    return r
+
+
 @dataclass
 class SimConfig:
     seed: int = 0

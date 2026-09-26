@@ -87,6 +87,25 @@ class VDRParams:
     gnss_moving_speed: float = 2.0   # m/s    a new fix faster than this clears a standstill flag
     sigma_zupt: float = 0.05         # m/s
     sigma_zaru: float = 0.01         # rad/s
+    # B3b — launch calibration (mount-free forward axis from the first seconds after a standstill)
+    use_launch: bool = True
+    launch_n_before: int = 8         # samples before the release included (the 1 s variance detector lags the true start)
+    launch_n_after: int = 20         # samples after the release (2.0 s)
+    launch_min_rest: int = 10        # samples of rest baseline needed (1 s)
+    launch_R_min: float = 0.8        # magnitude-weighted resultant length: |sum d| / sum |d|
+    launch_w_max: float = 0.05       # rad/s: |omega - b_g| must stay below this over the whole window
+    launch_min_accel: float = 0.4    # m/s²: mean |launch accel| (else the "release" was a bump / detector flicker)
+    launch_turn_comp: bool = True    # subtract the known centripetal term v*omega*u_perp (iterated) instead of requiring omega ~ 0
+    launch_w_max_comp: float = 0.8   # rad/s  hard limit on |omega - b_g| in compensated mode
+    launch_comp_max: float = 1.0     # mean |v*omega| / mean |launch accel| above this: too contaminated to trust
+    release_mean_thr: float = 0.6    # m/s²: 0.5 s mean of a_h departing from the rest baseline by this releases standstill (use_launch only)
+    release_mean_n: int = 3          # ... for this many consecutive samples
+    quiet_enter_n: int = 30          # samples of sustained quiet (3 s) that enter standstill even if v_hat is still high (use_launch only)
+    launch_sigma_v_after: float = 0.6
+    launch_sigma_ba: float = 0.2
+    rw_v_aided: float = 1.0          # m/s/√s speed noise while v is propagated from accel
+    aided_w_max: float = 0.10        # rad/s: forward-accel aiding only while |omega - b_g| is below this (centripetal leakage)
+    aided_max_s: float = 0.0           # forward-accel propagation stops this long after the launch is accepted (speed then held)
     # initial covariance (std devs)
     p0_pos: float = 5.0
     p0_psi: float = np.pi
@@ -110,6 +129,58 @@ def _causal_window_stats(x, w):
     return mean, var
 
 
+def evaluate_launch(ax, ay, wv, bg, dts, i_rel, i_now, b_h, p: VDRParams):
+    """Direction of the launch acceleration in the PHONE frame (mount-free forward axis).
+    Window [i_rel - launch_n_before, i_now]; d_k = a_h,k - b_h (b_h = rest baseline).
+
+    Strict mode (launch_turn_comp=False): accept only if |omega - b_g| < launch_w_max throughout.
+    Compensated mode: a launch is often a junction turn, so d_k = a_f,k u + v_k w_k u_perp with w_k = omega - b_g measured
+    and v_k = integral of a_f. The centripetal part is removed by fixed-point iteration (phi -> a_f -> v -> d') and the
+    result is trusted only if the correction is small next to the launch acceleration.
+    Returns phi (rad, forward axis from phone +x toward +y), R (magnitude-weighted resultant length), mean accel,
+    max |omega - b_g|, the contamination ratio, accepted flag and rejection reason."""
+    i0 = max(0, i_rel - p.launch_n_before)
+    d0 = np.column_stack([ax[i0:i_now + 1] - b_h[0], ay[i0:i_now + 1] - b_h[1]])
+    w = wv[i0:i_now + 1] - bg
+    dtw = dts[i0:i_now + 1]
+    sm = np.convolve(w, np.ones(3) / 3.0, mode="same")
+    wmax = float(np.max(np.abs(sm)))
+    tot = d0.sum(axis=0)
+    phi = float(np.arctan2(tot[1], tot[0]))
+    d, contam = d0, 0.0
+    if p.launch_turn_comp:
+        for _ in range(4):
+            u = np.array([np.cos(phi), np.sin(phi)]); up = np.array([-np.sin(phi), np.cos(phi)])
+            v = np.maximum(np.cumsum((d0 @ u) * dtw), 0.0)
+            cent = np.outer(v * w, up)
+            d = d0 - cent
+            t2 = d.sum(axis=0)
+            phi = float(np.arctan2(t2[1], t2[0]))
+        contam = float(np.mean(np.linalg.norm(cent, axis=1)) / max(np.mean(np.linalg.norm(d, axis=1)), 1e-9))
+    mag = np.linalg.norm(d, axis=1)
+    tot = d.sum(axis=0)
+    R = float(np.linalg.norm(tot) / max(mag.sum(), 1e-9))
+    mean_a = float(np.linalg.norm(tot) / len(d))
+    wlim = p.launch_w_max_comp if p.launch_turn_comp else p.launch_w_max
+    reason = "ok"
+    if wmax >= wlim:
+        reason = "turning"
+    elif contam > p.launch_comp_max:
+        reason = "centripetal correction too large"
+    elif R <= p.launch_R_min:
+        reason = "direction inconsistent"
+    elif mean_a < p.launch_min_accel:
+        reason = "acceleration too small"
+    out = dict(phi=phi, R=R, mean_accel=mean_a, wmax=wmax, contam=contam, accepted=(reason == "ok"), reason=reason, i0=i0)
+    if out["accepted"]:
+        u = np.array([np.cos(phi), np.sin(phi)])
+        v_cum = np.maximum(np.cumsum((d @ u) * dtw), 0.0)
+        out["v_now"] = float(v_cum[-1])
+        out["s_travelled"] = float(np.sum(v_cum * dtw))
+        out["b_a0"] = float(b_h @ u)
+    return out
+
+
 class _EKF:
     def __init__(self, p: VDRParams, v0: float):
         self.p = p
@@ -121,7 +192,8 @@ class _EKF:
         self.counts = {"pos": [0, 0], "speed": [0, 0], "course": [0, 0]}   # [accepted, rejected]
 
     # ── time update ───────────────────────────────────────────────────────────
-    def predict(self, dt, omega, stationary):
+    def predict(self, dt, omega, stationary, a_fwd=None):
+        """a_fwd: forward acceleration (phone accel projected on the launch axis) — None means v is held."""
         p, x = self.p, self.x
         psi, v, bg = x[2], x[3], x[4]
         w = 0.0 if stationary else (omega - bg)          # a stopped vehicle is not turning
@@ -130,6 +202,9 @@ class _EKF:
         x[0] += v * c * dt
         x[1] += v * s * dt
         x[2] = wrap_pi(psi + w * dt)
+        aided = a_fwd is not None and not stationary
+        if aided:
+            x[3] = max(0.0, v + (a_fwd - x[5]) * dt)
         F = np.eye(6)
         F[0, 2] = -v * s * dt; F[0, 3] = c * dt
         F[1, 2] = v * c * dt;  F[1, 3] = s * dt
@@ -137,9 +212,12 @@ class _EKF:
             F[0, 4] = v * s * dt * dt / 2.0
             F[1, 4] = -v * c * dt * dt / 2.0
             F[2, 4] = -dt
+        if aided:
+            F[3, 5] = -dt
         q_psi = (p.sigma_gyro * dt) ** 2 + (p.turn_noise * abs(w) * dt) ** 2
+        rw_v = p.rw_v_aided if aided else p.rw_v
         Q = np.diag([p.rw_pos ** 2 * dt, p.rw_pos ** 2 * dt, q_psi,
-                     p.rw_v ** 2 * dt, p.rw_bg ** 2 * dt, p.rw_ba ** 2 * dt])
+                     rw_v ** 2 * dt, p.rw_bg ** 2 * dt, p.rw_ba ** 2 * dt])
         self.P = F @ self.P @ F.T + Q
 
     # ── measurement update (Joseph form) ──────────────────────────────────────
@@ -226,6 +304,17 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
 
     stationary = False
     t_out, pos_out, v_out, hd_out, cov_tr, cov_m, st_out, flags = [], [], [], [], [], [], [], []
+    aided_out = []
+    dts = np.r_[0.1, np.diff(ts)]
+    dts = np.where((dts > 0) & (dts <= 1.0), dts, 0.1)
+    launches = []
+    aided, u_fwd = False, None                      # B3b: launch axis (phone frame) valid until the next standstill
+    rest_sum, rest_cnt, stat_start = np.zeros(2), 0, None
+    pending = None
+    quiet_run, dep_run = 0, 0
+    block_until = -1e9                              # no re-entry into standstill while a launch is being measured
+    t_accept = -1e9
+    REST_DELAY = 12                                 # rest baseline uses samples older than 1.2 s
     psi_init_t = None
     zaru_count = 0
     sigma_fix0 = max(acc[first], p.gnss_min_sigma) if np.isfinite(acc[first]) else 10.0
@@ -243,17 +332,60 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
 
         # ── time update (a data hole > 1 s is propagated honestly, Q grows with dt) ──
         omega = wv[i]
-        ekf.predict(dt, omega, stationary)
+        a_f = None
+        if aided and u_fwd is not None and abs(omega - ekf.x[4]) < p.aided_w_max and (t - t_accept) < p.aided_max_s:
+            a_f = float(ax[i] * u_fwd[0] + ay[i] * u_fwd[1])      # in a turn v is held: a_h.u would leak v*omega
+        ekf.predict(dt, omega, stationary, a_f)
 
         # ── stationarity (IMU only) ──────────────────────────────────────────
         v_est = ekf.x[3]
         wm = abs(w_mean[i] - ekf.x[4])
+        quiet = acc_var[i] < p.acc_var_enter and wm < p.w_enter
+        quiet_run = quiet_run + 1 if quiet else 0
+        mean_release = False
+        if p.use_launch and stationary and rest_cnt >= p.launch_min_rest and i >= 5:
+            m5 = np.array([ax[i - 4:i + 1].mean(), ay[i - 4:i + 1].mean()]) - rest_sum / rest_cnt
+            dep_run = dep_run + 1 if np.linalg.norm(m5) > p.release_mean_thr else 0
+            mean_release = dep_run >= p.release_mean_n
+        else:
+            dep_run = 0
         if stationary:
-            if acc_var[i] > p.acc_var_exit or wm > p.w_exit:
+            if acc_var[i] > p.acc_var_exit or wm > p.w_exit or mean_release:
                 stationary = False
                 ekf.P[3, 3] = max(ekf.P[3, 3], p.launch_sigma_v ** 2)   # the speed is no longer pinned to 0
-        elif i >= p.win and acc_var[i] < p.acc_var_enter and wm < p.w_enter and abs(v_est) < p.v_gate:
+                block_until = t + (p.launch_n_after + 5) * 0.1
+                if p.use_launch and stat_start is not None:              # IMU release: prepare a launch calibration
+                    if rest_cnt >= p.launch_min_rest:
+                        pending = dict(i_rel=i, b_h=rest_sum / rest_cnt)
+                    elif i - stat_start >= 15:
+                        launches.append(dict(t_release=float(ts[i]), reason="no rest baseline", accepted=False))
+        elif i >= p.win and quiet and t >= block_until and (abs(v_est) < p.v_gate or (p.use_launch and quiet_run >= p.quiet_enter_n)):
             stationary = True
+            aided, u_fwd, pending = False, None, None                    # a launch axis never outlives a standstill
+            stat_start, rest_sum, rest_cnt = i, np.zeros(2), 0
+        if stationary and stat_start is not None and i - REST_DELAY >= stat_start:
+            rest_sum += (ax[i - REST_DELAY], ay[i - REST_DELAY]); rest_cnt += 1
+
+        # ── B3b: evaluate the launch once its window (release + 2 s) is complete ──
+        if pending is not None and i >= pending["i_rel"] + p.launch_n_after:
+            ev = evaluate_launch(ax, ay, wv, ekf.x[4], dts, pending["i_rel"], i, pending["b_h"], p)
+            rec = dict(t_release=float(ts[pending["i_rel"]]), t_eval=float(t), phi_deg=float(np.degrees(ev["phi"])),
+                       R=ev["R"], mean_accel=ev["mean_accel"], wmax=ev["wmax"], contam=ev["contam"], accepted=ev["accepted"], reason=ev["reason"])
+            if ev["accepted"]:
+                u_fwd = np.array([np.cos(ev["phi"]), np.sin(ev["phi"])]); aided = True; t_accept = float(t)
+                # replay the window: the filter held v ~ 0 while the car was already accelerating
+                sdist, psi_now = ev["s_travelled"], ekf.x[2]
+                ekf.x[3] = ev["v_now"]
+                ekf.x[0] += sdist * np.cos(psi_now); ekf.x[1] += sdist * np.sin(psi_now)
+                ekf.x[5] = ev["b_a0"]
+                for k in (3, 5):
+                    ekf.P[k, :] = 0.0; ekf.P[:, k] = 0.0
+                ekf.P[3, 3] = p.launch_sigma_v_after ** 2
+                ekf.P[5, 5] = p.launch_sigma_ba ** 2
+                ekf.P[0, 0] += (0.3 * sdist) ** 2; ekf.P[1, 1] += (0.3 * sdist) ** 2
+                rec.update(v_now=ev["v_now"], s_travelled=sdist)
+            launches.append(rec)
+            pending = None
 
         # ── GNSS (new fixes only, never inside the outage) ───────────────────
         usable = (new_fix[i] and not in_outage
@@ -262,20 +394,6 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
             stationary = False                                   # GNSS says we are moving: the IMU detector was wrong
             ekf.P[3, 3] = max(ekf.P[3, 3], p.launch_sigma_v ** 2)
         if usable:
-            sig = max(acc[i], p.gnss_min_sigma) if np.isfinite(acc[i]) else 10.0
-            H = np.zeros((2, 6)); H[0, 0] = 1.0; H[1, 1] = 1.0
-            y = np.array([fixE[i] - ekf.x[0], fixN[i] - ekf.x[1]])
-            gated = ekf.consec_pos_rej < p.max_consecutive_pos_rejects
-            ok = ekf.update(y, H, np.eye(2) * sig ** 2, 2, "pos", t, gated=gated)
-            if ok:
-                ekf.counts["pos"][0] += 1
-                if not gated:
-                    ekf.gate_log[-1] = (float(t), "pos_forced", ekf.gate_log[-1][2], True)
-                ekf.consec_pos_rej = 0
-            else:
-                ekf.counts["pos"][1] += 1
-                ekf.consec_pos_rej += 1
-
             if np.isfinite(spd[i]):
                 H1 = np.zeros((1, 6)); H1[0, 3] = 1.0
                 ok = ekf.update(np.array([spd[i] - ekf.x[3]]), H1, np.array([[p.sigma_gnss_speed ** 2]]), 1, "speed", t)
@@ -291,6 +409,22 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
                     ok = ekf.update(np.array([float(wrap_pi(psi_meas - ekf.x[2]))]), H1,
                                     np.array([[np.radians(p.sigma_gnss_course_deg) ** 2]]), 1, "course", t)
                     ekf.counts["course"][0 if ok else 1] += 1
+
+            # position last: the direct speed / course measurements are gated before a position update
+            # has had the chance to narrow their variances through the cross-covariance
+            sig = max(acc[i], p.gnss_min_sigma) if np.isfinite(acc[i]) else 10.0
+            H = np.zeros((2, 6)); H[0, 0] = 1.0; H[1, 1] = 1.0
+            y = np.array([fixE[i] - ekf.x[0], fixN[i] - ekf.x[1]])
+            gated = ekf.consec_pos_rej < p.max_consecutive_pos_rejects
+            ok = ekf.update(y, H, np.eye(2) * sig ** 2, 2, "pos", t, gated=gated)
+            if ok:
+                ekf.counts["pos"][0] += 1
+                if not gated:
+                    ekf.gate_log[-1] = (float(t), "pos_forced", ekf.gate_log[-1][2], True)
+                ekf.consec_pos_rej = 0
+            else:
+                ekf.counts["pos"][1] += 1
+                ekf.consec_pos_rej += 1
 
         # ── ZUPT / ZARU ──────────────────────────────────────────────────────
         if stationary:
@@ -310,6 +444,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         cov_tr.append(float(P2[0, 0] + P2[1, 1]))
         cov_m.append([round(float(P2[0, 0]), 4), round(float(P2[1, 1]), 4), round(float(P2[0, 1]), 4)])
         st_out.append(bool(stationary))
+        aided_out.append(bool(aided))
         flags.append("outage" if in_outage else "healthy")
 
     return {
@@ -328,6 +463,8 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         "zaru_trigger_count": zaru_count,
         # vehicle_dr extras
         "stationary": st_out,
+        "aided": aided_out,
+        "launches": launches,
         "gate_log": ekf.gate_log,
         "gate_counts": {k: {"accepted": a, "rejected": r} for k, (a, r) in ekf.counts.items()},
         "psi_init_time": psi_init_t,

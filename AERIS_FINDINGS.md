@@ -353,6 +353,9 @@ intervals whose truth lies inside the reported 1σ ellipse (target ≈ 39 %). Tr
 | ESEKF fixes-only (true DR) | 148.02 / 151.96 / 309.49 | – | 282.95 / 359.52 | 165.3 | 447.3 | 0 % | 347.98 | reference |
 | S0 sandbox | n/a | – | – | – | – | – | – | 12 sandbox tests pass |
 | **B3a** vehicle_dr core (mount-free) | **22.46 / 17.32 / 65.23** | 22.92 | 59.54 / 153.78 | 0.1 | 0.2 | 50 % (LOO 45 %) | n/a (not allowed) | **PASS** (< 34.9 CV bar; 6.6× better than ESEKF fixes-only). Outage path/disp ≈ 0: speed is held, car is stopped at 200 s, nothing launches it → B3b |
+| B3b spec: launch φ, strict |ω| < 0.05, accel propagated until next standstill | 22.46 / 17.32 / 65.23 | – | – | – | – | – | n/a | **FAIL (no-op)**: all 5 S3b launches rejected as "turning" (max |ω| 0.3–0.6 rad/s: urban junction launches) |
+| B3b turn-compensated + accel propagated until next standstill (no cap) | 33.89 / 26.69 / 100.45 | – | – | – | – | 40 % | n/a | **worse — reverted** (first version, no turn gate: 48.55 / 36.20 / 178.72) |
+| **B3b** turn-compensated launch φ, **replay only** (aided_max_s = 0) | **21.93 / 17.11 / 64.85** | 22.12 | 64.35 / 145.89 | 75.5 | 104.9 | 50 % (LOO 45 %) | n/a (not allowed) | **PASS, marginal** (−0.53 m = −2.4 % vs B3a; 2 launches in the tuning window). Outage path 0.2 → 105 m, disp 0.1 → 75.5 m (reported, not tuned) |
 
 ### B3a — vehicle_dr core (`backend/vehicle_dr.py`, `backend/tune_vehicle_dr.py`)
 State [E, N, ψ, v, b_g, b_a]; ψ ENU radians (CCW from East), phone bearing → ψ = π/2 − radians(bearing) (unit-tested: cardinals, 45°,
@@ -379,3 +382,42 @@ window is 25–70 % rather than 25–55 %). Real S3b reference, same intervals: 
 Moving-only S3b intervals (n=15): vehicle_dr 17.75 / 15.95 / 41.01 vs const-v 35.96.
 200–260 s outage (REPORTED, not tuned): mean 59.54 m, end 153.78 m, path 0.2 m, displacement 0.1 m, |Δyaw| 277° (truth 676°), inside 1σ 20.3 %, σ at 260 s = 124 m.
 The filter is stopped at 200 s (correct) and, with speed held and no GNSS, never moves again — exactly what B3b (launch acceleration) has to fix.
+
+### B3b — launch calibration (mount-free forward axis) — `evaluate_launch()` and the standstill/launch logic in vehicle_dr.py
+Design: while stationary keep a rest baseline b_h (mean horizontal accel of samples older than 1.2 s). On release, over [release − 0.8 s, release + 2 s]
+(the 1 s variance detector lags the true start) take d = a_h − b_h; φ = direction of Σd. Accept only if the magnitude-weighted resultant length
+R = |Σd| / Σ|d| > 0.8, mean |d| ≥ 0.4 m/s² and, in the spec (strict) version, |ω − b_g| < 0.05 rad/s throughout. On acceptance the window's forward
+acceleration is replayed to recover the speed/position already covered (the filter held v ≈ 0 while the car was pulling away), b_a is initialised
+from b_h·u, and v̇ = a_h·u − b_a can be propagated. Every release attempt is logged in `result["launches"]`.
+
+What the sandbox caught (before real data):
+* Straight launches failed at first (R = 0.40, then "no rest baseline"): (1) variance-only release lags a smooth launch by 2–3 s → added a mean-based
+  release (0.5 s mean of a_h off the rest baseline by > 0.6 m/s²); (2) standstill entry needed v̂ < 2 m/s, but v̂ is only corrected by GNSS every 9 s → sustained
+  quiet (3 s) now enters standstill regardless of v̂; (3) a smooth launch looks "quiet", so the detector re-entered standstill right after releasing and
+  cancelled the calibration → re-entry blocked for the launch window. All three apply only when launch calibration is on (use_launch=False reproduces B3a exactly).
+* B3a flaw: the gate rejected a CORRECT GNSS speed of 0 after a 10 → 0 m/s stop, because the position update (applied first) shrank σ_v through the
+  cross-covariance. GNSS updates now go speed → course → position. Neutral on real S3b (identical numbers), fixes the sandbox lock-up.
+Sandbox result: φ recovered within ±3° on 5/5 straight launches and within ±5° on 5/5 turning launches (multi-stop route, junction turn right after the stop),
+also after an abrupt mount change while stopped (98–105° vs true 100°). 11 new tests (φ within 10°, mount change, strict mode refuses turning launch, bumps
+and no-standstill drives produce no launch, does not worsen the multi-stop route, unlimited aiding helps when the mount is stable, evaluator unit tests).
+
+Real S3b, spec version: all 5 launches rejected ("turning", max |ω| 0.30–0.61 rad/s). The spec's |ω| < 0.05 rule cannot accept urban junction launches. A turn-compensated
+variant (subtract the known centripetal term v·ω·u⊥ by fixed-point iteration; accept only if the correction is < 1× the launch acceleration) accepts them.
+Then propagating a_h·u until the next standstill HURTS on S3b: aided speed drifts 5–8 m/s between fixes (t=100 s: 2.5 vs 7.2 m/s; 120 s: 2.6 vs 8.9), because
+the phone's yaw relative to the car is not stable on S3b (B2) and turn leakage v·ω·sin(Δφ) enters the forward accel. Gating aiding to |ω − b_g| < 0.10 did not rescue it.
+Selection over the aiding duration cap (S3b mini-outages only; coverage-constrained rule; LOO):
+
+| aided_max_s | 0 (replay only) | 3 | 6 | 12 | ∞ |
+|---|---|---|---|---|---|
+| mean / median (m) | **21.93 / 17.11** | 21.94 / 17.10 | 22.12 / 17.22 | 22.89 / 18.86 | 33.89 / 26.69 |
+| coverage | 50 % | 50 % | 45 % | 45 % | 40 % |
+
+Chosen: replay only. LOO mean 22.12 (coverage 45 %). The gain over B3a is 0.53 m — real but small, resting on the 2 launches (90 s, 145 s) inside the tuning window.
+Launch log, S3b (whole drive; 5 release events before 260 s): t=89.9 φ +28.7° R 0.96 accepted (v₀ 4.0 m/s); 144.9 φ +128.9° R 0.79 rejected; 190.6 R 0.35 rejected; 201.9 rejected;
+214.2 φ +57.5° R 0.83 accepted (v₀ 2.3); 265.2 rejected (contamination 0.68); 418.3 φ +161.8° R 1.00 accepted (pure straight); 610.2 rejected.
+The three accepted φ (+29°, +58°, +162°) differ — consistent with B2: the S3b mount is not constant.
+Launch log, S1 (log only; no scoring): 50 release events, 31 accepted (13 "direction inconsistent", 6 "no rest baseline"), median R 0.96; accepted φ circular mean −51.3° but resultant
+length only 0.49 (histogram over 30° bins from −180°: 0,3,3,7,3,8,1,2,0,3,1,0). B2's independent calibration for S1: −80° / −51°, whole-drive mean −36.9°. The first four launches agree
+(−87°, −30°, −84°, −89°); later ones scatter (+8°, +98°, −53°, +142°, −21°, −104°, −20°, −8°), some near +100°…+140° (possibly reversing). Only roughly 40 % of accepted S1
+launches fall within ±30° of B2's φ, so launch φ is a weaker signal on real data than in the sandbox — one more reason it is used only to seed the speed.
+Outage (reported, not tuned): mean 64.35 m, end 145.89 m, path 104.9 m, displacement 75.5 m, |Δyaw| 288° (truth 676°), inside 1σ 20.3 %, σ at 260 s = 268 m.
