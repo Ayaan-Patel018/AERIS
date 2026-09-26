@@ -1,5 +1,110 @@
 # AERIS findings log
 
+# START HERE — handoff for a fresh session (state as of commit 22ec79f, 213 tests pass / 37 skipped)
+
+**Next step: E0.** E0 was designated by the user at the end of the previous session; its definition is NOT recorded in this log or in that
+session's transcript. Ask the user what E0 is before doing anything else — do not guess. Work already queued in this log that E0 may refer to:
+the improvement candidates B3e–B3i (user must say "go ideas"), B4 (final tuning + ablation + S3b PNG plot), B5 (validation on an untouched drive), the
+`--filter` flag for `export_frontend_data.py`, and the original Step 3 (dashboard regeneration + frontend hard-coded values) which the user has NOT yet released.
+
+## Rules (CLAUDE.md + standing rules)
+* Branch `fix/heading-spin`; never touch `main`; **push after every commit** (`git push origin fix/heading-spin`); never `git stash pop`; one change at a time.
+* HARD RULE: nothing shown as AERIS may use VBOX (`V-*.csv`) speed/heading/path as an input (scoring and diagnostics only). No snapping to truth.
+* `backend/ins_ekf.py` (ESEKF) stays untouched as the comparison baseline. Venv: `nav-env` (`nav-env/Scripts/python.exe`); dataset `./IO-VNBD`. Untracked files
+  `anurag_branch_full.zip`, `branch_diff_stat.txt` are not ours — do not commit them.
+* Conventions inside vehicle_dr: psi is ENU, radians, counter-clockwise from East; the phone course field is a BEARING (degrees clockwise from North):
+  `psi = pi/2 - radians(bearing)`, wrapped (`bearing_to_psi`, unit-tested).
+* Tuning data = S3b mini-outages (intervals between consecutive NEW phone fixes ending <= 200 s, 20 of them) ONLY. Report mean AND median AND max, plus
+  leave-one-interval-out (LOO) for tuned parameters. S1 is never tuned on; the 200-260 s outage is never tuned on (reported only).
+* Step protocol: (1) sandbox test passes, (2) real S3b mini-outage metric, (3) row appended to the results table, (4) commit + push. A step that fails its pass
+  criterion is reverted (the feature flag defaults to OFF; code and sandbox tests stay), the reason is logged, and work continues.
+* Selection rule used for tuning (fixed in advance, `backend/tune_vehicle_dr.py`): lowest mean mini-outage error among grid points whose 1-sigma coverage is in [30, 50] %
+  (target ~39 %); if none qualifies, closest to 39 %.
+
+## Files
+| file | what |
+|---|---|
+| `backend/vehicle_dr.py` | THE new filter: 6-state [E, N, psi, v, b_g, b_a] EKF; `run_pipeline(s_df, None, outage_window, params, t_end)`; `VDRParams`; `bearing_to_psi`; `evaluate_launch`; `calibrate_fixed_mount` |
+| `backend/check_outage.py` | scoring: `python backend/check_outage.py [drive] [--filter esekf or vehicle_dr] [--fixes-only] [--mini-only]` (200-260 s outage report + mini-outage section with hold / const-v baselines) |
+| `backend/tune_vehicle_dr.py` | `Evaluator` (S3b mini-outages, ~0.4 s per run), `grid_search` (coverage-constrained rule + LOO), `summarize` |
+| `backend/mount_angle.py` | B2 calibration: phone horizontal frame -> vehicle forward angle, two criteria; `python backend/mount_angle.py S3b S1 --windows 30` |
+| `backend/sim_drive.py` | synthetic drive with known truth (`simulate`, `SimConfig`, `default_route`, `long_route`, `multi_stop_route`) |
+| `backend/tests/test_vehicle_dr.py` | 52 sandbox tests (`python backend/run_tests.py`; or `cd backend && ../nav-env/Scripts/python.exe -m unittest tests.test_vehicle_dr`) |
+| `backend/data_loader.py` | loaders; phone `timestamp_s` from the wall-clock column; `sv_time_offset()` (scoring only); phone GPS speed is already m/s; gyro axis mapping (A2) |
+| `backend/ins_ekf.py` | ESEKF baseline (do not modify); its Phase A fixes are in the log |
+
+Diagnostic one-off scripts lived in a session scratchpad and are gone; everything reported is reproducible with the CLIs above.
+
+## vehicle_dr current defaults (`VDRParams`) and which features are ON / OFF
+**ON (default):** causal GNSS on NEW fixes only (position sigma = max(gps_accuracy_m, 3 m); speed; course when speed > 3 m/s), chi-square 99 % gate on every GNSS update
+(3 consecutive position rejections -> next fix accepted ungated, logged `pos_forced`; **course and speed have no failsafe**), IMU-only standstill -> ZUPT + ZARU, psi frozen while stationary,
+GNSS update order speed -> course -> position, honest propagation of data holes (dt > 1 s), B3b launch calibration with turn compensation and **replay only** (`aided_max_s = 0`).
+
+**OFF (default False; code + sandbox tests kept):** `use_centripetal` (B3c, failed on S3b), `use_fixed_mount` (B3d, no benefit on S1). Accel-integrated speed (`aided_max_s > 0`) is off because it hurt on S3b.
+
+| group | defaults |
+|---|---|
+| process noise | sigma_gyro 0.010 rad/s, turn_noise 0.50, rw_v 2.00 m/s/sqrt(s), rw_bg 1e-4, rw_ba 1e-3, rw_pos 0.10, rw_v_aided 1.0 |
+| GNSS | gnss_min_sigma 3.0 m, sigma_gnss_speed 0.3 m/s, sigma_gnss_course_deg 6.0, min_course_speed 3.0 m/s, min_satellites 6, gate_enabled True, max_consecutive_pos_rejects 3 |
+| standstill | win 10 samples, acc_var_enter 0.10 / exit 0.30, w_enter 0.05 / exit 0.10 rad/s, v_gate 2.0 m/s, launch_sigma_v 1.5, gnss_moving_speed 2.0, sigma_zupt 0.05, sigma_zaru 0.01 |
+| launch (ON) | use_launch True, n_before 8, n_after 20, min_rest 10, R_min 0.8, min_accel 0.4 m/s^2, turn_comp True, w_max_comp 0.8, comp_max 1.0, release_mean_thr 0.6 (x3 samples), quiet_enter_n 30, sigma_v_after 0.6, sigma_ba 0.2, aided_w_max 0.10, aided_max_s 0.0 |
+| centripetal (OFF) | use_centripetal False, cent_w_min 0.15, cent_steady 0.10, cent_every 5, cent_v_min 1.0, sigma_cent 1.0 (untuned default; best S3b grid point was 4.0 = nearly off), cent_res 0.6, cent_bg_coupling False |
+| fixed mount (OFF) | use_fixed_mount False, mount_cal_t 200 s, gate: both criteria corr > 0.8 and within 30 deg, sigma_lat 0.8, sigma_ba_rest 0.15 |
+| initial P (std) | pos 5 m, psi pi, v 5 m/s, b_g 0.02, b_a 0.3; psi_init_sigma 6 deg |
+
+Sanity check that the state is as documented: `python backend/check_outage.py S3b --filter vehicle_dr` must give mini-outages 21.93 / 17.11 / 64.85 (n = 20, coverage 50 %) and outage mean 64.35 m, end 145.89 m.
+
+## Latest results table (S3b unless stated; mini = mean / median / max in m over the 20 intervals ending <= 200 s)
+| step | S3b mini | LOO mean | S3b outage mean / end | disp (154) | path (~225) | 1-sigma coverage (~39 %) | S1 mini mean | verdict |
+|---|---|---|---|---|---|---|---|---|
+| baseline: hold last fix | 52.95 / 59.55 / 106.70 | – | – | – | – | – | 72.21 | reference |
+| baseline: last fix + const-v | 34.89 / 39.71 / 73.36 | – | – | – | – | – | 26.67 | bar to beat |
+| ESEKF as shipped (interpolated GNSS: tracking, not DR) | 12.90 / 10.35 / 43.04 | – | 55.02 / 129.56 | 34.0 | 145.4 | 0 % | 10.69 | reference |
+| ESEKF fixes-only (its real DR) | 148.02 / 151.96 / 309.49 | – | 282.95 / 359.52 | 165.3 | 447.3 | 0 % | 347.98 | reference |
+| B3a vehicle_dr core | 22.46 / 17.32 / 65.23 | 22.92 | 59.54 / 153.78 | 0.1 | 0.2 | 50 % | n/a | pass |
+| B3b as specified (strict omega < 0.05) | 22.46 / 17.32 / 65.23 | – | – | – | – | – | n/a | fail: no S3b launch accepted |
+| B3b turn-comp + accel integrated to next stop | 33.89 / 26.69 / 100.45 | – | – | – | – | 40 % | n/a | worse, reverted |
+| **B3b replay only (CURRENT DEFAULT)** | **21.93 / 17.11 / 64.85** | 22.12 | 64.35 / 145.89 | 75.5 | 104.9 | 50 % | n/a | pass, marginal (-0.53 m; 2 launches in the tuning window) |
+| B3c centripetal speed (best S3b grid point) | 22.12 / 17.64 / 62.28 | 23.75 | 72.22 / 163.16 | 115.9 | 159.5 | 45 % | n/a | fail, OFF |
+| B3d fixed-mount aiding (S3b gate inactive; S1 active, phi -65.5 deg) | = B3b | 22.12 | 64.35 / 145.89 | 75.5 | 104.9 | 50 % | off 43.89 / on 52.66 | no benefit, OFF |
+
+S1 (validation, nothing tuned on it), 523 intervals outside 200-260 s: B3d off 43.89 / 20.05 / 620 (coverage 30 %); B3d on 52.66 / 20.09 / 1097 (20 %); const-v 26.67 / 22.78 / 136.
+
+Current default outage (S3b, reported not tuned): mean 64.35, end 145.89, max 145.89, path 104.9 m (truth 225.7), displacement 75.5 m (truth 154.0), |dyaw| 288 deg (truth 676),
+truth inside 1-sigma 20.3 %, sigma at 260 s = 268 m, gap last fix -> AERIS at 200 s = 4.26 m, pre-outage (20-200 s) mean 10.76 m vs raw phone GNSS 7.08 m.
+
+## Known issues (open)
+1. **S1 heavy error tail from a hard-gate lock-out (highest priority).** vehicle_dr's S1 median 20.05 m beats const-v (22.78) but the mean 43.89 does not (26.67): 11.1 % of intervals > 100 m (const-v 0.8 %), 4 % > 200 m,
+   max 620 m; mean without the worst 5 % is 31.0 m. In 9 of the 10 worst intervals BOTH the course and the position update were rejected by the 99 % gate at the interval-start fix; whole drive: 107 course rejections,
+   94 position rejections, 29 forced position accepts, 1 speed rejection (S3b: 1 / 1 / 0 / 0). Once psi is wrong the gate rejects exactly the measurements that would repair it; only position has a failsafe and a forced
+   position accept does not repair psi. NOT fixed on purpose (found on S1 = validation): candidate B3i (Huber / Student-t GNSS updates) or a course failsafe, to be justified and verified on the sandbox and S3b.
+2. **Outage shape: path 105 m vs 225.7 m truth, displacement 75.5 m vs 154 m; mean error 64.35 m is worse than the old ESEKF's 55.0 m.** After the 180-212 s stop the car is started only by the launch replay
+   (v ~ 2.3 m/s at 214 s) and the speed is then held, while the real car accelerates to ~8 m/s; no GNSS and no usable forward-accel model inside the outage. Reported sigma at 260 s is 268 m (1-sigma coverage 20 %).
+3. **Forward-accel information is not usable on real data**: the phone's yaw relative to the car is NOT constant on S3b (per 30 s windows 9/19 fit well at scattered angles 73 to -115 deg; resultant length 0.31), and on S1 the
+   calibrated angle is only good to +-25-30 deg (criteria 29 deg apart; about 40 % of accepted S1 launch angles within 30 deg of it). Everything that projects the accel on a forward axis (accel-integrated speed, fixed-mount aiding,
+   signed centripetal) works on the sandbox but is neutral or harmful on S3b/S1.
+4. Small tuning set: 20 S3b mini-outage intervals; the coverage-constrained selection sits at the 50 % edge; the error surface is flat (22.5-24 m) so tuning bought honest uncertainty, not accuracy. B3b evidence = 2 launches.
+5. Sandbox coverage test window is 25-70 %, not 25-55 % (S3b-tuned noise gives ~64 % on the calmer sandbox).
+6. `run_tests.py` skips 37 dataset tests: `tests/conftest.py` looks for IO-VNBD three directories up, but it is at the repo root (pre-existing; not fixed).
+7. S3b data facts: 4.33 s logging hole at row 2043 (S-time ~204 s, car stopped); phone GNSS reflects position ~0.5 s earlier than the wall-clock alignment (~4 m at 8 m/s, left as a known scoring bias); VBOX ends before the phone.
+8. `export_frontend_data.py`: `--filter {esekf,vehicle_dr}` is NOT implemented yet (default is honest / non sim-aided). Original Step 3 (regenerate dashboard data, remove hard-coded fakes such as "LOCKED (11 SATS)" in
+   Sidebar.tsx / StatusPanel.tsx and the hard-coded outage window in useGNSSStatus.ts / TimelineSlider) has not been started; the user must release it.
+9. The S3b comparison PNG (truth, phone fixes, vehicle_dr, ESEKF, outage shaded) required for B4 is not produced yet (target `backend/exports/evaluation/`).
+
+## Data / validation facts a new session needs
+* Untouched same-driver drives with S+V pairs (never loaded by any experiment so far): **S2 (156 min), S3a (41 min), S3c (62 min), S4 (158 min)** under
+  `IO-VNBD/Synchronised V abd S datasets/Categorised IOVNB Dataset/S (Driver A)/<drive>/S-<drive>.csv` and `V-<drive>.csv`. `check_outage.load_drive("<drive>")` handles them. Recommended: use one (S3c or S3a) as the fresh validation drive for B5.
+  Before scoring a new drive, redo the B0 time-alignment check (phone-GNSS vs VBOX error per fix, lag scan; loader uses the phone wall-clock column and `sv_time_offset()` for scoring).
+* **S1 is no longer pristine**: it was used for the A1/A2 diagnostics, the launch log (50 releases, 31 accepted), the mount-stability scan, the B3d validation and the tail characterisation.
+* Other drives exist (M, Vf, Vta, Vtb, Vw, Y) — not investigated.
+* Real-data facts: phone GNSS fix every ~9 s (values held between fixes); speed column already m/s; vertical gyro = CSV "Pitch" column (A2); gravity columns are ~(0, 0, 9.806) so the phone is treated as flat;
+  ESEKF's real dead-reckoning is 3-13x worse than const-v (its 10-12 m "tracking" comes from 10 Hz interpolated GNSS, i.e. non-causal).
+* Candidate ideas still open (user must say "go ideas"): B3e stochastic cloning (between-fix displacement), B3f gyro scale factor (A2 slopes 1.29 S3b vs 0.94 S1), B3g learned vibration speed, B3h magnetometer heading aid, B3i robust GNSS.
+* After the ideas: B4 = final tuning on S3b mini-outages (with LOO), report the S3b 200-260 s outage ONCE + ablation table + PNG; B5 = validation once with NO retuning (mini-outages + 200-260 s outage).
+
+---
+
+
 All numbers from `python backend/check_outage.py [drive]` unless noted:
 `run_pipeline(s_df, None, mode="full", outage_window=(200,260))`, scored against V-<drive>.csv
 (truth linearly interpolated to AERIS timestamps). "1σ" = truth within the reported 2-D
