@@ -312,6 +312,37 @@ class TestWindowBenchmark(unittest.TestCase):
         t = np.array([12.34, 100.0, 250.05])
         self.assertTrue(np.allclose(self.truth.pos(t), ref(t), atol=1e-9))
 
+    def test_launch_from_stop_flag(self):
+        # the sandbox car is stopped 177.4-209.3 s (default_route): windows starting in the stop or within 10 s after it are flagged
+        rows = {r["start"]: r for r in check_outage.window_benchmark(self.s, self.truth, [100.0, 200.0, 215.0, 240.0])}
+        self.assertFalse(rows[100.0]["stopped_recently"])
+        self.assertTrue(rows[200.0]["stopped_recently"])
+        self.assertTrue(rows[215.0]["stopped_recently"])
+        self.assertFalse(rows[240.0]["stopped_recently"])
+
+
+class TestDevEval(unittest.TestCase):
+    def test_parse_set_types_and_unknown_fields(self):
+        import dev_eval
+        p = dev_eval.parse_set(vehicle_dr.VDRParams(), ["turn_noise=0.3", "use_launch=false", "rw_v=1"])
+        self.assertEqual(p.turn_noise, 0.3)
+        self.assertIs(p.use_launch, False)
+        self.assertEqual(p.rw_v, 1.0)
+        with self.assertRaises(SystemExit):
+            dev_eval.parse_set(vehicle_dr.VDRParams(), ["no_such_param=1"])
+
+    def test_summary_uses_end_error_and_absolute_split(self):
+        import dev_eval
+        rows = [dict(vdr=dict(end_err=float(e), abs_cross_end=float(c), abs_along_end=float(a), mean_err=1.0, path_ratio=1.0, inside=50.0))
+                for e, c, a in [(10, 1, 9), (20, 2, 18), (30, 3, 27), (100, 4, 96)]]
+        s = dev_eval.summ(rows, "vdr")
+        self.assertEqual(s["n"], 4)
+        self.assertAlmostEqual(s["med_end"], 25.0)
+        self.assertAlmostEqual(s["p90_end"], float(np.percentile([10, 20, 30, 100], 90)))
+        self.assertAlmostEqual(s["med_cross"], 2.5)
+        self.assertAlmostEqual(s["med_along"], 22.5)
+        self.assertEqual(dev_eval.summ([], "vdr")["n"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

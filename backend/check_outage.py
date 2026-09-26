@@ -39,6 +39,7 @@ import window_plan
 OUTAGE = (200.0, 260.0)
 FILTERS = ("esekf", "vehicle_dr")
 WINDOW_S = window_plan.LENGTH_S
+LAUNCH_LOOKBACK_S = 10.0     # a window "starts within 10 s after an IMU standstill" if the standstill flag was set in [start - 10 s, start]
 RESERVED = {"S3c": "final validation drive (B5)", "S3a": "reserve drive",
             "S4": "I3 training drive (never scored)"}       # registry v2: S2 became a development drive
 
@@ -395,7 +396,9 @@ def window_benchmark(s_df, truth, starts, params=None, length=WINDOW_S, run_kw=N
         m = (t >= s0) & (t <= s1)
         tw = t[m]
         cv, vcv, hold = baseline_tracks(s_df, fix_rows, s0, tw, lat0, lon0)
-        out.append(dict(start=float(s0), n=int(m.sum()),
+        st = np.asarray(res["stationary"], dtype=bool)               # IMU-only standstill flag of the filter (causal)
+        stopped_recently = bool(np.any(st[(t >= s0 - LAUNCH_LOOKBACK_S) & (t <= s0)]))
+        out.append(dict(start=float(s0), n=int(m.sum()), stopped_recently=stopped_recently,
                         vdr=score_track(truth, tw, _res_enu(res, m), np.array(res["velocities"])[m], np.array(res["cov_matrix"])[m]),
                         cv=score_track(truth, tw, cv, vcv), hold=score_track(truth, tw, hold, np.zeros(len(tw))),
                         gate_counts=res.get("gate_counts")))

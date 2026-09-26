@@ -849,3 +849,23 @@ Context (ESEKF as shipped, same block): mean |along| 37.47, mean |cross| 33.97, 
 * Added, unrequested but small and reversible: the reserved-drive guard (`--unseal`), `--per-window`, and a stricter early validation of `--windows`. `CLAUDE.md` now carries the standing rules and drive registry; its old line "Commit only
   when a result improves" was replaced by the plan's step protocol (commit per step; a failed step stays behind a flag OFF), and its "S1 = unseen validation" wording was corrected (S1 is previously inspected).
 * No S3c, S3a, S2, S4 or S1 window was scored in E0. S1 windows (secondary) and S3c windows (B5) are one command away: `--windows all` (S1) / `--unseal --windows all` (S3c, B5 only).
+
+
+# H0 — development harness + S2 onboarding (2026-09-26, registry v2; no filter change)
+**S2 alignment (B0 redone with the new reusable `backend/check_alignment.py`; S2 is a development drive so its errors may be looked at).** The tool reproduces the logged B0 numbers (S1: mean 4.94 m, median 4.39 m, best shift -0.50 s -> 2.62 m;
+S3b: median 4.71 m vs logged 4.74, mean 5.20 vs 5.76 because the tool drops fixes in the last 5 s where VBOX has already ended). S2: S/V clock offset 7.341 s (S3b 0.69, S3c 0.72, S1 0.55), 940 usable fixes,
+phone GNSS vs VBOX at the aligned time mean 2.69 m / median 2.25 m / p90 5.02 m, flat over the whole 9388 s (16 segments of 600 s: 1.9-3.9 m, no step, no trend) -> the timeline is correct, the registered S2 window list stands (no amendment).
+**Observation for I1a:** the best lag shift is -0.50 s on S3b and S1 but 0.00 to +0.25 s on S2 — the GNSS-latency / clock-alignment residual is NOT the same on every drive, so a latency estimated on S3b need not transfer.
+**Harness** (`backend/dev_eval.py`, tested): one call scores a `VDRParams` on the S3b dev windows (11), the S2 dev windows (861, 16 worker processes), the S3b mini-outages, the S3b event (report only), 1-sigma coverage and the launch-from-stop subset
+(dev windows whose start is within 10 s after an IMU standstill: filter `stationary` flag set in [start - 10 s, start]; n = 138 pooled), with hold and const-v scored on exactly the same windows. `--set key=value` overrides any `VDRParams` field.
+A full evaluation takes ~160 s (S2 dominates). 32 tests in `test_eval_e0.py` (launch-from-stop flag, parameter parsing, summaries added).
+
+**Baseline = the E0 default on the development set** (median end / p90 end / median |cross| at end / median |along| at end, metres):
+| | S3b dev windows (n = 11) | S2 dev windows (n = 861) | pooled med end | S3b mini mean | launch-from-stop med end (n = 138) | event mean / end / path ratio (report only) | 1σ mini / S3b-win / S2-win |
+|---|---|---|---|---|---|---|---|
+| hold-last-fix | 156.5 / 299.6 / 142.0 / 64.2 | 368.6 / 869.4 / 132.6 / 261.6 | 365.0 | – | 264.7 | – | – |
+| const-v | 430.7 / 668.0 / 162.8 / 366.1 | 385.5 / 758.7 / 183.6 / 241.6 | 386.2 | – | 251.7 | – | – |
+| **vehicle_dr default (E0 reference)** | **161.5 / 214.2 / 121.9 / 76.5** | **152.3 / 490.9 / 66.9 / 98.0** | 153.1 | 21.93 | 151.2 | 64.35 / 145.89 / 0.46 | 50 % / 53 % / 41 % |
+S3b numbers are identical to the E0 report (harness check). **New facts from S2:** vehicle_dr already beats hold clearly on S2 (median end 152 vs 369 m, p90 491 vs 869 m), i.e. "vehicle_dr ≈ hold" (E0) is a property of S3b's slow stop-and-go driving where
+"stay put" is a strong baseline; on S2 the error is along-track dominated (|along| 98 vs |cross| 67 m at the end), the opposite of S3b (|cross| 122 vs |along| 77). The two development drives therefore stress different error components.
+The launch-from-stop windows (n = 138 pooled; S3b contributes few) are much harder than average for every method (hold 265, const-v 252, vehicle_dr 151 m median end).
