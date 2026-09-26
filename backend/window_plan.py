@@ -39,15 +39,20 @@ MIN_SATELLITES = 6                      # = VDRParams.min_satellites
 EVENT_START_S = 200.0                   # S3b's demo outage 200-260 s
 
 
-def usable_fix_times(s_df, min_satellites=MIN_SATELLITES):
-    """Timestamps of NEW phone fixes the filter may use (finite lat/lon that changed; enough satellites when known)."""
+def usable_fix_rows(s_df, min_satellites=MIN_SATELLITES):
+    """Row indices of NEW phone fixes the filter may use (finite lat/lon that changed; enough satellites when known)."""
     lat, lon = s_df["gps_lat"].values.astype(float), s_df["gps_lon"].values.astype(float)
     ok = np.isfinite(lat) & np.isfinite(lon)
     new = np.r_[True, (np.diff(lat) != 0) | (np.diff(lon) != 0)] & ok
     if "gps_satellites" in s_df:
         sats = s_df["gps_satellites"].values.astype(float)
         new &= ~(np.isfinite(sats) & (sats < min_satellites))
-    return s_df["timestamp_s"].values.astype(float)[new]
+    return np.flatnonzero(new)
+
+
+def usable_fix_times(s_df, min_satellites=MIN_SATELLITES):
+    """Timestamps of the usable NEW phone fixes (see usable_fix_rows)."""
+    return s_df["timestamp_s"].values.astype(float)[usable_fix_rows(s_df, min_satellites)]
 
 
 def drive_end(s_df, v_df, off):

@@ -1,11 +1,12 @@
 # AERIS findings log
 
-# START HERE — handoff for a fresh session (state as of commit 22ec79f, 213 tests pass / 37 skipped)
+# START HERE — handoff for a fresh session (state after E0, 242 tests pass / 37 skipped; vehicle_dr defaults UNCHANGED since 22ec79f)
 
-**Next step: E0.** E0 was designated by the user at the end of the previous session; its definition is NOT recorded in this log or in that
-session's transcript. Ask the user what E0 is before doing anything else — do not guess. Work already queued in this log that E0 may refer to:
-the improvement candidates B3e–B3i (user must say "go ideas"), B4 (final tuning + ablation + S3b PNG plot), B5 (validation on an untouched drive), the
-`--filter` flag for `export_frontend_data.py`, and the original Step 3 (dashboard regeneration + frontend hard-coded values) which the user has NOT yet released.
+**E0 (evaluation upgrade) is DONE and reported; the user reviews it before anything else.** The full plan E0 → D is saved verbatim below under "PLAN: E0 → D" — read it, plus the
+"DRIVE REGISTRY" and "PRE-REGISTRATION" sections right after it. **Next step: I1a (GNSS latency), then I1b (robustness), then I2, I3 — only after the user says to continue**
+(the plan stops after E0 and again after I3, where the table below must be shown). I4-I6, B4, B5, C, D wait for "go next".
+Per-step protocol (standing rules): sandbox test with a numeric pass criterion first -> real-data metrics -> row in the plan table below -> full suite passes -> commit + push;
+a failed step stays in the code behind a flag set to OFF, with the reason logged.
 
 ## Rules (CLAUDE.md + standing rules)
 * Branch `fix/heading-spin`; never touch `main`; **push after every commit** (`git push origin fix/heading-spin`); never `git stash pop`; one change at a time.
@@ -14,10 +15,12 @@ the improvement candidates B3e–B3i (user must say "go ideas"), B4 (final tunin
   `anurag_branch_full.zip`, `branch_diff_stat.txt` are not ours — do not commit them.
 * Conventions inside vehicle_dr: psi is ENU, radians, counter-clockwise from East; the phone course field is a BEARING (degrees clockwise from North):
   `psi = pi/2 - radians(bearing)`, wrapped (`bearing_to_psi`, unit-tested).
-* Tuning data = S3b mini-outages (intervals between consecutive NEW phone fixes ending <= 200 s, 20 of them) ONLY. Report mean AND median AND max, plus
-  leave-one-interval-out (LOO) for tuned parameters. S1 is never tuned on; the 200-260 s outage is never tuned on (reported only).
-* Step protocol: (1) sandbox test passes, (2) real S3b mini-outage metric, (3) row appended to the results table, (4) commit + push. A step that fails its pass
-  criterion is reverted (the feature flag defaults to OFF; code and sandbox tests stay), the reason is logged, and work continues.
+* Tuning data = S3b mini-outages (intervals between consecutive NEW phone fixes ending <= 200 s, 20 of them) and, from E0 on, the S3b sliding 60 s windows that END before 200 s
+  (11 windows, starts 30-130). Report mean AND median AND max (windows: median / mean / p90), plus leave-one-out for tuned parameters. S1 and S3c are never tuned on; the 200-260 s
+  event is never tuned on (reported only). **Drive registry:** S3b tuning; S2/S4 training for I3 only; S3c final validation (B5, untouched, guarded by `--unseal`); S1 previously inspected (secondary); S3a reserve.
+* Step protocol: (1) sandbox test with a numeric pass criterion, (2) real S3b metrics (mini-outages + tuning windows), (3) row appended to the results table, (4) full test suite, (5) commit + push. A step that fails its
+  pass criterion keeps its code behind a feature flag set to OFF (sandbox tests stay), the reason is logged, and work continues.
+* Windows console: pipe output only with `PYTHONUTF8=1` (a `≈` in a print raises UnicodeEncodeError under cp1252).
 * Selection rule used for tuning (fixed in advance, `backend/tune_vehicle_dr.py`): lowest mean mini-outage error among grid points whose 1-sigma coverage is in [30, 50] %
   (target ~39 %); if none qualifies, closest to 39 %.
 
@@ -25,7 +28,9 @@ the improvement candidates B3e–B3i (user must say "go ideas"), B4 (final tunin
 | file | what |
 |---|---|
 | `backend/vehicle_dr.py` | THE new filter: 6-state [E, N, psi, v, b_g, b_a] EKF; `run_pipeline(s_df, None, outage_window, params, t_end)`; `VDRParams`; `bearing_to_psi`; `evaluate_launch`; `calibrate_fixed_mount` |
-| `backend/check_outage.py` | scoring: `python backend/check_outage.py [drive] [--filter esekf or vehicle_dr] [--fixes-only] [--mini-only]` (200-260 s outage report + mini-outage section with hold / const-v baselines) |
+| `backend/check_outage.py` | scoring: `python backend/check_outage.py [drive] [--filter esekf or vehicle_dr] [--fixes-only] [--mini-only] [--windows auto/tuning/all/off] [--per-window] [--unseal]` — 200-260 s outage report, **E0 along/cross + speed + path-ratio block**, mini-outage section (hold / const-v baselines) and, for vehicle_dr on S3b, the **sliding 60 s tuning windows** (`window_benchmark`, `score_track`, `Truth`, `summarize_windows` are importable for tuning scripts). Reserved drives S3c/S3a/S2/S4 need `--unseal`. |
+| `backend/window_plan.py` | deterministic sliding-window plan (phone fix availability + file time span only; the pre-registered rule); `python backend/window_plan.py S3c` reproduces the registered list (sha1 96375f11...) |
+| `backend/tests/test_eval_e0.py` | 29 tests: window-plan rule, along/cross (line, circle, stopped truth), path ratio, speed diagnostics, guard, sandbox windows (GNSS really hidden, truncation exact, baselines, vehicle_dr beats hold) |
 | `backend/tune_vehicle_dr.py` | `Evaluator` (S3b mini-outages, ~0.4 s per run), `grid_search` (coverage-constrained rule + LOO), `summarize` |
 | `backend/mount_angle.py` | B2 calibration: phone horizontal frame -> vehicle forward angle, two criteria; `python backend/mount_angle.py S3b S1 --windows 30` |
 | `backend/sim_drive.py` | synthetic drive with known truth (`simulate`, `SimConfig`, `default_route`, `long_route`, `multi_stop_route`) |
@@ -52,7 +57,9 @@ GNSS update order speed -> course -> position, honest propagation of data holes 
 | fixed mount (OFF) | use_fixed_mount False, mount_cal_t 200 s, gate: both criteria corr > 0.8 and within 30 deg, sigma_lat 0.8, sigma_ba_rest 0.15 |
 | initial P (std) | pos 5 m, psi pi, v 5 m/s, b_g 0.02, b_a 0.3; psi_init_sigma 6 deg |
 
-Sanity check that the state is as documented: `python backend/check_outage.py S3b --filter vehicle_dr` must give mini-outages 21.93 / 17.11 / 64.85 (n = 20, coverage 50 %) and outage mean 64.35 m, end 145.89 m.
+Sanity check that the state is as documented: `PYTHONUTF8=1 python backend/check_outage.py S3b --filter vehicle_dr` must give mini-outages 21.93 / 17.11 / 64.85 (n = 20, coverage 50 %), outage mean 64.35 m, end 145.89 m
+(reproduced 2026-09-26 before E0 and again after it), and the E0 reference: tuning windows (n = 11) mean error median / mean 80.97 / 84.11, end error median / p90 161.47 / 214.23, path ratio median 0.96;
+event along / cross at end -85.58 / +118.15 m, path ratio 0.46. Runtime: one full vehicle_dr run of S3b = 0.10 s measured (15 us/row); all 345 S3c windows would take roughly 2 min (estimate, not measured).
 
 ## Latest results table (S3b unless stated; mini = mean / median / max in m over the 20 intervals ending <= 200 s)
 | step | S3b mini | LOO mean | S3b outage mean / end | disp (154) | path (~225) | 1-sigma coverage (~39 %) | S1 mini mean | verdict |
@@ -73,7 +80,30 @@ S1 (validation, nothing tuned on it), 523 intervals outside 200-260 s: B3d off 4
 Current default outage (S3b, reported not tuned): mean 64.35, end 145.89, max 145.89, path 104.9 m (truth 225.7), displacement 75.5 m (truth 154.0), |dyaw| 288 deg (truth 676),
 truth inside 1-sigma 20.3 %, sigma at 260 s = 268 m, gap last fix -> AERIS at 200 s = 4.26 m, pre-outage (20-200 s) mean 10.76 m vs raw phone GNSS 7.08 m.
 
+## Plan results table (E0 → I3; S3b only; append a row per step; show this table to the user after I3)
+Tuning windows = the 11 S3b 60 s outages starting 30-130 s (end < 200 s). Along / cross = MEDIAN over windows of |along| / |cross| at the end of the window (m). Event = the 200-260 s outage (reported, never tuned).
+Coverage = truth inside the reported 1-sigma ellipse: mini-outage intervals / windows (median over windows of the per-epoch fraction).
+
+| step | S3b mini mean / median | 60 s tuning windows: median / p90 end error | tuning path ratio (median) | along / cross at end (median, abs) | 200-260 s event: mean / end / path ratio | 1σ coverage | verdict |
+|---|---|---|---|---|---|---|---|
+| **E0 reference: vehicle_dr default (B3b replay-only)** | 21.93 / 17.11 | 161.47 / 214.23 | 0.96 | 76.5 / 121.9 | 64.35 / 145.89 / 0.46 | 50 % / 53 % | **reference** |
+| E0 baseline: last fix + const-v | 34.89 / 39.71 | 430.75 / 667.96 | 1.20 | 366.1 / 162.8 | not scored | – | reference |
+| E0 baseline: hold last fix | 52.95 / 59.55 | 156.49 / 299.58 | 0.00 | 64.2 / 142.0 | not scored | – | reference |
+| I1a GNSS latency | | | | | | | pending |
+| I1b robustness (course failsafe / reset / Huber) | | | | | | | pending |
+| I2a OU speed prior | | | | | | | pending |
+| I2b turn speed ceiling | | | | | | | pending |
+| I3 vibration speed (alone, and with I2a) | | | | | | | pending |
+| best combination | | | | | | | pending |
+
+Other E0 reference numbers (vehicle_dr default, tuning windows, median / mean / p90): mean error 80.97 / 84.11 / 110.67 m; |along| at end 76.52 / 83.73 / 132.93; |cross| at end 121.90 / 130.70 / 191.65;
+mean speed error 4.71 / 4.61 / 5.86 m/s; path ratio 0.96 / 1.08 / 1.48; 1-sigma coverage 52.6 / 44.2 / 66.6 %. Event: mean |along| 28.73 m, mean |cross| 54.32 m, mean speed error 2.64 m/s. Details in the E0 section at the end of this file.
+
 ## Known issues (open)
+0. **(E0) The 60 s windows and the event measure different regimes; vehicle_dr's 60 s outage error is large.** On the tuning windows vehicle_dr beats const-v and hold on MEAN error (median 81 vs 243 / 143 m) but its END error is
+   no better than doing nothing (median 161 vs hold 156 m); it is cross-track dominated (|cross| 122 m vs |along| 77 m at the end): heading/turn shape, not only speed. The mean speed error is 4.7 m/s (speed is held while real driving is
+   stop-and-go). The tuning windows have path ratio ~1 (speed held from a moving state is right on average), the event has 0.46 (car starts from a stop inside the outage) — so I2 tuned on these windows need not fix the event;
+   the event stays report-only. 11 windows overlap heavily (~2.7 independent 60 s stretches): a thin tuning signal.
 1. **S1 heavy error tail from a hard-gate lock-out (highest priority).** vehicle_dr's S1 median 20.05 m beats const-v (22.78) but the mean 43.89 does not (26.67): 11.1 % of intervals > 100 m (const-v 0.8 %), 4 % > 200 m,
    max 620 m; mean without the worst 5 % is 31.0 m. In 9 of the 10 worst intervals BOTH the course and the position update were rejected by the 99 % gate at the interval-start fix; whole drive: 107 course rejections,
    94 position rejections, 29 forced position accepts, 1 speed rejection (S3b: 1 / 1 / 0 / 0). Once psi is wrong the gate rejects exactly the measurements that would repair it; only position has a failsafe and a forced
@@ -92,15 +122,16 @@ truth inside 1-sigma 20.3 %, sigma at 260 s = 268 m, gap last fix -> AERIS at 20
 9. The S3b comparison PNG (truth, phone fixes, vehicle_dr, ESEKF, outage shaded) required for B4 is not produced yet (target `backend/exports/evaluation/`).
 
 ## Data / validation facts a new session needs
-* Untouched same-driver drives with S+V pairs (never loaded by any experiment so far): **S2 (156 min), S3a (41 min), S3c (62 min), S4 (158 min)** under
-  `IO-VNBD/Synchronised V abd S datasets/Categorised IOVNB Dataset/S (Driver A)/<drive>/S-<drive>.csv` and `V-<drive>.csv`. `check_outage.load_drive("<drive>")` handles them. Recommended: use one (S3c or S3a) as the fresh validation drive for B5.
-  Before scoring a new drive, redo the B0 time-alignment check (phone-GNSS vs VBOX error per fix, lag scan; loader uses the phone wall-clock column and `sv_time_offset()` for scoring).
+* Same-driver drives with S+V pairs: **S2 (156 min), S3a (41 min), S3c (62 min), S4 (158 min)** under
+  `IO-VNBD/Synchronised V abd S datasets/Categorised IOVNB Dataset/S (Driver A)/<drive>/S-<drive>.csv` and `V-<drive>.csv`. `check_outage.load_drive("<drive>")` handles them. **Roles are fixed by the drive registry:
+  S3c = final validation (B5; its window list and event window are PRE-REGISTERED, no error seen), S3a = reserve, S2 + S4 = I3 training only.** Loading S3c for the pre-registration touched only phone GNSS availability and file timestamps.
+  Before scoring a new drive (S3c at B5), redo the B0 time-alignment check (phone-GNSS vs VBOX error per fix, lag scan; loader uses the phone wall-clock column and `sv_time_offset()` for scoring).
 * **S1 is no longer pristine**: it was used for the A1/A2 diagnostics, the launch log (50 releases, 31 accepted), the mount-stability scan, the B3d validation and the tail characterisation.
 * Other drives exist (M, Vf, Vta, Vtb, Vw, Y) — not investigated.
 * Real-data facts: phone GNSS fix every ~9 s (values held between fixes); speed column already m/s; vertical gyro = CSV "Pitch" column (A2); gravity columns are ~(0, 0, 9.806) so the phone is treated as flat;
   ESEKF's real dead-reckoning is 3-13x worse than const-v (its 10-12 m "tracking" comes from 10 Hz interpolated GNSS, i.e. non-causal).
-* Candidate ideas still open (user must say "go ideas"): B3e stochastic cloning (between-fix displacement), B3f gyro scale factor (A2 slopes 1.29 S3b vs 0.94 S1), B3g learned vibration speed, B3h magnetometer heading aid, B3i robust GNSS.
-* After the ideas: B4 = final tuning on S3b mini-outages (with LOO), report the S3b 200-260 s outage ONCE + ablation table + PNG; B5 = validation once with NO retuning (mini-outages + 200-260 s outage).
+* The old B3e-B3i idea list is now the plan's I-steps: B3i robust GNSS = I1b, B3g learned vibration speed = I3, B3f gyro scale = I4, B3e stochastic cloning = I5, B3h magnetometer = I6 (I4-I6 only on "go next").
+* After the I-steps: B4 = final settings frozen, ablation table (core, +each kept step), the S3b 200-260 s event reported ONCE; B5 = the pre-registered S3c windows + event window with NO retuning, S1 secondary. Then C (demo layer) and D (OSM road-matching, after approval).
 
 ---
 
@@ -210,7 +241,7 @@ S3c facts used (file length / GNSS availability only): phone 3718.2 s, S/V offse
 S3c grid starts excluded by the availability rule (GNSS holes in the phone file): 50-70, 910-920, 2030-2070, 2130-2150, 3530-3570. S3b: none excluded.
 No S3c filter output, truth position or error has been computed or looked at; loading S3c for this plan touched only timestamps and GNSS availability. At B5 the B0 time-alignment check
 (phone GNSS vs V per fix; needed before scoring a new drive) is the first thing that will look at S3c/V positions.
-Guard (to be added in the next E0 commit, together with the scoring code): `check_outage.py` refuses to score S3c / S3a / S2 / S4 without `--unseal`.
+Guard (implemented in the E0 scoring commit, unit-tested): `check_outage.py` refuses to score S3c / S3a / S2 / S4 without `--unseal`.
 Honesty note on the S3b tuning windows: 11 windows spaced 10 s apart and lasting 60 s overlap heavily and cover only 30-190 s of driving, i.e. about 2.7 independent 60 s stretches. Their median/p90 are a thin
 tuning signal; expect a flat error surface, use leave-one-window-out only as a weak overfitting check, and do not over-read differences of a few metres.
 
@@ -687,3 +718,64 @@ Over the whole drive: 107 course rejections, 94 position rejections, 29 forced p
 position has a "3 consecutive rejections → accept" failsafe, course has none, and a forced position accept does not repair ψ. This is a logic weakness of hard gating, visible on S1 but not S3b. I did NOT change the filter in response: S1 is a
 validation drive, and the fix (candidate B3i: robust Huber/Student-t GNSS updates, or a course failsafe) must be justified and verified on the sandbox and S3b, not by looking at S1.
 Caveat for B5: S1 has now been looked at several times (launch log, this report, tail characterisation), so it is no longer a pristine unseen drive; untouched same-driver, same-phone drives exist (S2 156 min, S3a 41 min, S3c 62 min, S4 158 min).
+
+
+# E0 — evaluation upgrade (2026-09-26): `check_outage.py` + `window_plan.py`  — no filter change; vehicle_dr defaults identical to 22ec79f
+Existing output kept byte-for-byte (re-verified: outage 64.35 / 145.89, mini 21.93 / 17.11 / 64.85, coverage 50 %; ESEKF default unchanged at 55.02 / 129.56).
+
+**What was added** (all scoring-side; VBOX never reaches a filter):
+* (a) Along/cross error. `Truth` = VBOX track in the filter's ENU frame on the phone clock; travel direction = position(t + 0.5 s) - position(t - 0.5 s) (carried forward while the car moves < 0.3 m in that second, so the split stays defined at stops).
+  along = (AERIS - truth) . direction (+ = AERIS ahead); cross = (AERIS - truth) . left normal (+ = AERIS to the left); along^2 + cross^2 = error^2 (tested). Reported: mean |along|, mean |cross|, and both (signed) at the end.
+* (b) Speed diagnostics (filter v state vs VBOX speed): mean |dv|, values at +30 s and at the end; path ratio = AERIS path / truth path, both on the AERIS 10 Hz grid (the older "AERIS path / truth path" line uses native V rows: 225.7 m vs 225.6 m on the grid).
+* (c) Sliding 60 s outages: `window_benchmark` runs vehicle_dr once per window with GNSS hidden on [start, start+60] (run truncated at the window end: exact, tested) and scores the window rows; the same windows are scored for the
+  last-fix + const-v baseline (fix strictly before the window start, speed > 1 m/s along its course) and the hold baseline. Summaries over windows = median / mean / p90 (numpy linear percentile). Window plan and S3c pre-registration: see the PRE-REGISTRATION section.
+* (d) Reference row = the table above. Also: reserved-drive guard, `--windows`, `--per-window`, `--unseal`.
+
+**Verification before trusting the numbers** (sandbox criteria were fixed in the test-file docstring before the real metrics were computed; 29 new tests, suite 242 pass / 37 skip):
+* along/cross recovered a known offset to < 1e-6 m on a straight line and < 0.02 m on a circle; sign convention (ahead +, left +) tested; stopped truth carries the last direction; path ratio of a half-speed track = 0.500;
+* sandbox windows: corrupting the phone GNSS inside a window (+1.1 km, speed 50 m/s, course 123 deg) changes that window's result by < 1e-9 m (hiding is real); truncation is exact (< 1e-9); baselines use only fixes before the window; vehicle_dr beats hold on the sandbox;
+* real S3b: the direction derived from truth positions agrees with VBOX's own heading column, median |diff| 0.56 deg, p90 2.56 deg, mean signed +0.18 deg (n = 5289 samples, speed > 3 m/s) — the ENU / bearing conventions and the left normal are right;
+* a window starting at 200 s reproduces the event report exactly (64.35 / 145.89 / along -85.58 / cross +118.15 / ratio 0.465 / mean |dv| 2.64).
+One bug found by the tests, in the test not the metric: a circle scored at the very last reference sample was 0.25 m off because within 0.5 s of the ends of the reference file the direction chord is one-sided (np.interp clamps). Real windows end
+well inside the file (S3c last registered window ends 3710 s vs 3717.5 s limit; S3b tuning windows end <= 190 s), so it is documented in `Truth`, not changed (the registered window rule stays as committed).
+
+**Reference row: S3b tuning windows (n = 11, starts 30-130 s), median / mean / p90 over windows**
+| metric | vehicle_dr default | last fix + const-v | hold last fix |
+|---|---|---|---|
+| mean error (m) | 80.97 / 84.11 / 110.67 | 243.22 / 239.02 / 307.95 | 142.59 / 145.78 / 199.54 |
+| end error (m) | 161.47 / 162.84 / 214.23 | 430.75 / 456.87 / 667.96 | 156.49 / 192.77 / 299.58 |
+| \|along\| at end (m) | 76.52 / 83.73 / 132.93 | 366.06 / 277.37 / 478.03 | 64.22 / 95.20 / 181.11 |
+| \|cross\| at end (m) | 121.90 / 130.70 / 191.65 | 162.78 / 265.60 / 527.32 | 142.00 / 149.61 / 242.52 |
+| along at end, signed (m) | -65.09 / -45.99 / 65.39 | 32.69 / -10.44 / 390.33 | -32.32 / -35.78 / 64.22 |
+| cross at end, signed (m) | -100.83 / -38.85 / 121.90 | -61.17 / -43.48 / 341.43 | -75.27 / -32.53 / 230.56 |
+| path ratio AERIS / truth | 0.96 / 1.08 / 1.48 | 1.20 / 1.20 / 2.05 | 0 (stays put) |
+| mean \|speed error\| (m/s) | 4.71 / 4.61 / 5.86 | 4.38 / 4.04 / 5.50 | 5.51 / 6.00 / 7.66 |
+| truth inside 1-sigma (%) | 52.58 / 44.15 / 66.56 | – | – |
+
+Per window (vehicle_dr: mean error, end error, along, cross at end, path ratio, % epochs inside 1 sigma; const-v mean / end):
+30: 94.9 / 230.9 / -174.4 / -151.4 / 1.09 / 63 % ; 178.1 / 394.1 — 40: 131.9 / 207.4 / +79.1 / -191.7 / 0.96 / 49 % ; 243.2 / 440.8 — 50: 81.0 / 180.4 / -132.9 / +121.9 / 2.16 / 64 % ; 354.5 / 807.1 —
+60: 110.7 / 214.2 / +49.8 / +208.4 / 0.84 / 17 % ; 242.6 / 422.9 — 70: 77.4 / 123.7 / -26.9 / +120.8 / 0.93 / 33 % ; 191.5 / 430.7 — 80: 68.3 / 93.7 / -76.5 / +54.1 / 0.56 / 12 % ; 275.4 / 546.0 —
+90: 42.2 / 133.2 / -111.6 / -72.8 / 1.03 / 67 % ; 82.5 / 123.3 — 100: 51.6 / 172.5 / +65.4 / -159.6 / 1.48 / 67 % ; 245.2 / 481.9 — 110: 86.1 / 139.9 / +13.2 / -139.3 / 0.89 / 53 % ; 275.7 / 367.7 —
+120: 80.2 / 133.8 / -65.1 / -117.0 / 0.88 / 56 % ; 232.5 / 343.0 — 130: 100.8 / 161.5 / -126.1 / -100.8 / 1.08 / 5 % ; 307.9 / 668.0.
+
+**The 200-260 s event, along/cross split (vehicle_dr default; reported, never tuned)**
+mean |along| 28.73 m, mean |cross| 54.32 m (mean error 64.35 m); at the end along -85.58 m, cross +118.15 m (end error 145.89 m); path ratio 0.46 (104.9 m / 225.6 m); mean speed error 2.64 m/s.
+Speed, truth (VBOX) vs filter, every 5 s from 200 s: 0.01 / 0.00, 0.02 / 0.00, 0.02 / 0.00, **1.75 / 0.00 (215 s)**, 5.97 / 2.34, 0.05 / 2.34 (second stop at ~225 s), 2.50 / 2.34, 5.15, 4.35, 8.35, 6.01, 8.16, **1.13 / 2.34 (260 s)**;
+truth max 8.73 m/s. So the "+30 s: 2.34 vs 2.50, +60 s: 2.34 vs 1.13" spot values are instantaneous readings in stop-and-go traffic; mean |dv| and the path ratio are the meaningful summaries.
+Context (ESEKF as shipped, same block): mean |along| 37.47, mean |cross| 33.97, end along -121.95 / cross +43.75, path ratio 0.64, mean |dv| 2.10 m/s.
+
+**What E0 says (facts and cautious readings)**
+1. Over 60 s vehicle_dr beats const-v (mean error median 81 vs 243 m) and hold (143 m) on the mean error, but its END error (median 161 m) is no better than "stay at the last fix" (156 m); p90 end 214 vs 300 m for hold.
+   const-v is far worse than hold over 60 s (it overshoots turns: |along| 366 m). The bar that matters for 60 s outages is hold, not const-v.
+2. vehicle_dr's end error is cross-track dominated on the tuning windows (|cross| 122 m vs |along| 77 m) and in the event (+118 m cross vs -86 m along): the path shape (heading through turns) is the larger problem, speed the second.
+   The along error is negative in 7 of 11 windows and in the event (AERIS lags) but not systematically (median -65 m, mean -46 m).
+3. The mean speed error is 4.7 m/s on the tuning windows (speed is held; real urban speed swings 0-9 m/s) — the motivation for I2 / I3 — while path ratio ~0.96 says the held speed is right on average, so a speed prior may fix the along error but cannot fix the cross error.
+4. Regime mismatch: tuning windows are moving drives, path ratio ~1; the event starts from a stop (path ratio 0.46). Improvements found on the windows are not guaranteed to move the event, which stays report-only.
+5. The windows are strongly overlapping (11 windows, ~2.7 independent stretches); per-window mean errors range 42-132 m. Treat differences of a few metres as noise.
+
+**Decisions / deviations to disclose**
+* "windows that END before 200 s" was applied strictly (start + 60 < 200) -> starts 30-130, 11 windows (the window starting at 140 ends at exactly 200 s and is excluded).
+* The S3c event window = the same absolute [200, 260] s as the S3b demo outage (CLAUDE.md demo timeline), registered before any S3c error existed; only GNSS availability was checked.
+* Added, unrequested but small and reversible: the reserved-drive guard (`--unseal`), `--per-window`, and a stricter early validation of `--windows`. `CLAUDE.md` now carries the standing rules and drive registry; its old line "Commit only
+  when a result improves" was replaced by the plan's step protocol (commit per step; a failed step stays behind a flag OFF), and its "S1 = unseen validation" wording was corrected (S1 is previously inspected).
+* No S3c, S3a, S2, S4 or S1 window was scored in E0. S1 windows (secondary) and S3c windows (B5) are one command away: `--windows all` (S1) / `--unseal --windows all` (S3c, B5 only).
