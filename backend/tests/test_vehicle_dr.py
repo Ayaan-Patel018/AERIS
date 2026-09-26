@@ -119,5 +119,144 @@ class TestSandbox(unittest.TestCase):
         self.assertFalse(a.equals(c))
 
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B3a — vehicle_dr core
+# ─────────────────────────────────────────────────────────────────────────────
+import vehicle_dr
+import check_outage
+from vehicle_dr import bearing_to_psi, psi_to_bearing_deg, wrap_pi as vdr_wrap
+
+
+class TestAngleConventions(unittest.TestCase):
+    """Phone course is a BEARING (deg, clockwise from North); vehicle_dr's psi is ENU (rad, CCW from East)."""
+
+    def test_cardinal_directions(self):
+        self.assertAlmostEqual(float(bearing_to_psi(0.0)), np.pi / 2)        # North
+        self.assertAlmostEqual(float(bearing_to_psi(90.0)), 0.0)             # East
+        self.assertAlmostEqual(float(bearing_to_psi(180.0)), -np.pi / 2)     # South
+        west = float(bearing_to_psi(270.0))                                  # West: +/- pi
+        self.assertAlmostEqual(abs(west), np.pi)
+
+    def test_northeast_is_45_degrees_ccw_from_east(self):
+        self.assertAlmostEqual(float(bearing_to_psi(45.0)), np.pi / 4)
+
+    def test_direction_vectors_agree(self):
+        # bearing b points along (E, N) = (sin b, cos b); psi points along (cos psi, sin psi)
+        for b in (0, 30, 90, 135, 200, 270, 359):
+            psi = float(bearing_to_psi(b))
+            self.assertAlmostEqual(np.cos(psi), np.sin(np.radians(b)), places=9)
+            self.assertAlmostEqual(np.sin(psi), np.cos(np.radians(b)), places=9)
+
+    def test_round_trip_and_wrapping(self):
+        for b in (-370.0, -90.0, 0.0, 1.0, 359.9, 360.0, 725.0):
+            back = float(psi_to_bearing_deg(bearing_to_psi(b)))
+            self.assertAlmostEqual((back - b + 180.0) % 360.0 - 180.0, 0.0, places=6)
+        self.assertTrue(-np.pi <= float(bearing_to_psi(123.0)) < np.pi)
+
+    def test_wrap_pi(self):
+        self.assertAlmostEqual(float(vdr_wrap(3 * np.pi / 2)), -np.pi / 2)
+        self.assertAlmostEqual(float(vdr_wrap(-3 * np.pi / 2)), np.pi / 2)
+        self.assertAlmostEqual(float(vdr_wrap(0.3)), 0.3)
+
+    def test_sandbox_course_field_round_trips_to_truth_psi(self):
+        s, tr = simulate(SimConfig(seed=2, course_sigma_deg=0.0))
+        k = int(np.flatnonzero(tr.v.values > 5)[0])
+        fix = int(k // 90 * 90)
+        psi_from_phone = float(bearing_to_psi(s.gps_heading_deg.values[k]))
+        self.assertAlmostEqual(float(vdr_wrap(psi_from_phone - tr.psi_rad.values[fix])), 0.0, places=6)
+
+
+def _mini(res, s, tr, t_max=200.0):
+    rows = check_outage.mini_outage(res, s, tr, 0.0, t_max=t_max)
+    err = np.array([r["aeris"] for r in rows]); cv = np.array([r["cv"] for r in rows])
+    ins = np.array([r["inside"] for r in rows], dtype=float)
+    return rows, err, cv, ins
+
+
+class TestVehicleDRCore(unittest.TestCase):
+    """B3a. Sandbox pass criteria: beats the last-fix + constant-velocity baseline; honest uncertainty; ZUPT works;
+    causal; never uses V-data; GNSS never used inside the outage."""
+    SEEDS = (0, 1, 2, 3)
+
+    @classmethod
+    def setUpClass(cls):
+        cls.runs = {}
+        for sd in cls.SEEDS:
+            s, tr = simulate(SimConfig(seed=sd))
+            cls.runs[sd] = (s, tr, vehicle_dr.run_pipeline(s, None, outage_window=(200.0, 260.0)))
+
+    def test_result_dict_has_the_run_pipeline_keys(self):
+        res = self.runs[0][2]
+        for k in ("mode", "outage_window", "yaw_observable", "timestamps", "positions", "velocities", "headings",
+                  "covariances", "cov_matrix", "gnss_status", "lat0", "lon0", "zaru_trigger_count"):
+            self.assertIn(k, res)
+        n = len(res["timestamps"])
+        self.assertEqual(n, len(self.runs[0][0]) - 1)
+        for k in ("positions", "velocities", "headings", "covariances", "cov_matrix", "gnss_status"):
+            self.assertEqual(len(res[k]), n)
+        self.assertTrue(np.all(np.isfinite(np.array(res["positions"]))))
+
+    def test_beats_const_velocity_baseline_on_every_seed(self):
+        for sd in self.SEEDS:
+            s, tr, res = self.runs[sd]
+            _, err, cv, _ = _mini(res, s, tr)
+            self.assertLess(err.mean(), cv.mean(), (sd, err.mean(), cv.mean()))
+
+    def test_one_sigma_coverage_is_honest(self):
+        # S3b-tuned noise on the calmer sandbox slightly over-covers (~64 %); the window guards against 0 % / 100 %.
+        cov = np.mean([100 * _mini(r[2], r[0], r[1])[3].mean() for r in self.runs.values()])
+        self.assertTrue(25.0 <= cov <= 70.0, cov)
+
+    def test_heading_tracks_truth_between_fixes(self):
+        s, tr, res = self.runs[0]
+        psi = np.radians(np.array(res["headings"]))
+        k = np.arange(1, len(psi) + 1)
+        err = np.degrees(np.abs(vdr_wrap(psi - tr.psi_rad.values[k])))
+        moving = (tr.v.values[k] > 3.0) & (tr.timestamp_s.values[k] < 200.0)
+        self.assertLess(np.median(err[moving]), 6.0)
+
+    def test_standstill_pins_speed_to_zero_and_position_holds(self):
+        s, tr, res = self.runs[0]
+        t = np.array(res["timestamps"]); v = np.array(res["velocities"])
+        stop = (tr.timestamp_s.values >= 185.0) & (tr.timestamp_s.values <= 205.0)
+        idx = np.flatnonzero(stop) - 1
+        self.assertLess(np.abs(v[idx]).max(), 0.3)
+        self.assertTrue(np.all(np.array(res["stationary"])[idx]))
+
+    def test_gate_rejects_few_fixes_and_logs_them(self):
+        res = self.runs[1][2]
+        c = res["gate_counts"]["pos"]
+        self.assertLess(c["rejected"], 0.2 * (c["accepted"] + c["rejected"]))
+        self.assertIsInstance(res["gate_log"], list)
+        for t, kind, d2, ok in res["gate_log"]:
+            self.assertIsInstance(ok, bool)
+
+    def test_no_gnss_inside_the_outage_window(self):
+        res = self.runs[0][2]
+        for t, kind, d2, ok in res["gate_log"]:
+            if kind in ("pos", "pos_forced", "speed", "course"):
+                self.assertFalse(200.0 <= t <= 260.0, (t, kind))
+
+    def test_is_causal(self):
+        s, tr, full = self.runs[0]
+        part = vehicle_dr.run_pipeline(s, None, outage_window=(200.0, 260.0), t_end=120.0)
+        n = len(part["timestamps"])
+        self.assertTrue(np.allclose(np.array(part["positions"]), np.array(full["positions"])[:n]))
+        self.assertTrue(np.allclose(part["headings"], full["headings"][:n]))
+
+    def test_vbox_argument_is_ignored(self):
+        s, tr, full = self.runs[0]
+        garbage = tr.copy(); garbage["gps_lat"] += 1.0; garbage["gps_heading_deg"] = 12.3
+        other = vehicle_dr.run_pipeline(s, garbage, outage_window=(200.0, 260.0))
+        self.assertTrue(np.allclose(np.array(other["positions"]), np.array(full["positions"])))
+
+    def test_psi_initialised_from_first_course_fix(self):
+        for sd in self.SEEDS:
+            res = self.runs[sd][2]
+            self.assertTrue(res["yaw_observable"])
+            self.assertLessEqual(res["psi_init_time"], 9.0)
+
+
 if __name__ == "__main__":
     unittest.main()

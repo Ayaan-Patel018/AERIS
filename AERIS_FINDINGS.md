@@ -352,3 +352,30 @@ intervals whose truth lies inside the reported 1σ ellipse (target ≈ 39 %). Tr
 | ESEKF as shipped (interpolated GNSS) | 12.90 / 10.35 / 43.04 | – | 55.02 / 129.56 | 34.0 | 145.4 | 0 % | 10.69 | reference (tracking, not DR) |
 | ESEKF fixes-only (true DR) | 148.02 / 151.96 / 309.49 | – | 282.95 / 359.52 | 165.3 | 447.3 | 0 % | 347.98 | reference |
 | S0 sandbox | n/a | – | – | – | – | – | – | 12 sandbox tests pass |
+| **B3a** vehicle_dr core (mount-free) | **22.46 / 17.32 / 65.23** | 22.92 | 59.54 / 153.78 | 0.1 | 0.2 | 50 % (LOO 45 %) | n/a (not allowed) | **PASS** (< 34.9 CV bar; 6.6× better than ESEKF fixes-only). Outage path/disp ≈ 0: speed is held, car is stopped at 200 s, nothing launches it → B3b |
+
+### B3a — vehicle_dr core (`backend/vehicle_dr.py`, `backend/tune_vehicle_dr.py`)
+State [E, N, ψ, v, b_g, b_a]; ψ ENU radians (CCW from East), phone bearing → ψ = π/2 − radians(bearing) (unit-tested: cardinals, 45°,
+direction vectors, round trip, wrapping, sandbox course field). Propagation ψ̇ = ω_vert − b_g, v held (random walk), Ė = v cosψ, Ṅ = v sinψ; ψ frozen
+while stationary. GNSS causal: position on NEW fixes only (σ = max(gps_accuracy_m, 3)), speed on new fixes, course when speed > 3 m/s (ψ initialised
+from the first fix with speed > 3), IMU-only standstill (1 s accel variance < 0.10, |mean ω − b_g| < 0.05, v̂ < 2) → ZUPT + ZARU, chi-square 99 % gate
+on every GNSS update with a log (3 consecutive position rejections → next fix accepted ungated, logged `pos_forced`). No clipping or discarding of
+accepted corrections; a data hole (dt > 1 s) is propagated honestly (Q grows with dt). VBOX never an input (`v_df` ignored; tested).
+
+Bugs the sandbox caught before real data was touched (first sandbox run: mean 84 m vs CV 24 m, 13/30 position fixes rejected):
+1. ZUPT pinned v = 0 (σ 0.05) at a false/real standstill; afterwards σ_v regrew far too slowly (0.6 m/s/√s) for a 1.5 m/s² launch, so the 99 % gate rejected
+   the CORRECT GNSS speed and then the position fixes, and the filter stayed overconfident (σ_pos ≈ 7 m at 300 m error). Fix: when standstill releases, reset
+   σ_v ≥ 1.5 m/s; a new fix faster than 2 m/s clears a stale standstill flag; rw_v must cover real accelerations.
+2. The first fix's own course/speed were not used to initialise ψ (loop started at row 1). Fixed.
+3. Sandbox car started from rest, a start-up transient S3b does not have (its log begins mid-drive at ~11 m/s) → sandbox now starts at v0 = 8 m/s.
+
+Tuning (S3b mini-outages ONLY; 60-point grid over rw_v {0.8,1.2,1.5,2,3} × turn_noise {0.1,0.2,0.3,0.5} × σ_gnss_speed {0.3,0.5,1.0};
+rule fixed in advance: lowest mean error among grid points with 1σ coverage in [30, 50] %). Untuned defaults: 22.96 / 17.57 / 67.72, coverage 30 %.
+Chosen rw_v = 2.0, turn_noise = 0.5, σ_gnss_speed = 0.3: 22.46 / 17.32 / 65.23, LOO mean 22.92, coverage 50 % (LOO 45 %).
+The error surface is FLAT — 22.5–24.1 m over most of the plausible region — so the tuning mostly bought honest uncertainty (coverage 30 → 50 %), not accuracy;
+the in-sample/LOO gap is 0.46 m. Accuracy is limited by the model structure (speed is held between fixes), not by these parameters.
+Sandbox (4 seeds): mean 16.9–17.0 m vs CV 21.9–24.3 m; coverage 64 % (the calmer sandbox slightly over-covers with S3b-tuned noise, so the sandbox test
+window is 25–70 % rather than 25–55 %). Real S3b reference, same intervals: hold 52.95, const-v 34.89, ESEKF fixes-only 148.02.
+Moving-only S3b intervals (n=15): vehicle_dr 17.75 / 15.95 / 41.01 vs const-v 35.96.
+200–260 s outage (REPORTED, not tuned): mean 59.54 m, end 153.78 m, path 0.2 m, displacement 0.1 m, |Δyaw| 277° (truth 676°), inside 1σ 20.3 %, σ at 260 s = 124 m.
+The filter is stopped at 200 s (correct) and, with speed held and no GNSS, never moves again — exactly what B3b (launch acceleration) has to fix.

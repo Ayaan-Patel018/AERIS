@@ -60,6 +60,7 @@ class SimConfig:
     dt: float = 0.1
     route: Optional[list] = None
     psi0_deg: float = 90.0                    # start heading, ENU (90 = facing North)
+    v0: float = 8.0                           # starting speed: the log begins mid-drive, like S3b (0 = from rest)
     # gyro
     gyro_scale: float = 1.0
     gyro_bias: float = -0.008                 # rad/s
@@ -97,7 +98,7 @@ def _kinematics(cfg):
     dt = cfg.dt
     E = N = 0.0
     psi = np.deg2rad(cfg.psi0_deg)
-    v = 0.0
+    v = cfg.v0
     out = {k: [] for k in ("E", "N", "psi", "v", "omega", "a_fwd", "stationary")}
     for seg in route:
         st = dict(travelled=0.0, turned=0.0, waited=0.0)
