@@ -38,6 +38,7 @@ UNIT_MODULES = [
     "tests.test_ekf",
     "tests.test_gnss_classifier",
     "tests.test_data_loader",   # has both unit + integration classes
+    "tests.test_vehicle_dr",    # sandbox (sim_drive) + vehicle_dr filter
 ]
 
 INTEGRATION_MODULES = [
@@ -53,6 +54,7 @@ LAYER_DESCRIPTIONS = {
     "tests.test_ekf":              "Layer 1 — 15-state ES-EKF mechanics",
     "tests.test_gnss_classifier":  "Layer 1 — Rule-based GNSS Quality Classifier",
     "tests.test_data_loader":      "Layer 1+2 — Data loader (unit + integration)",
+    "tests.test_vehicle_dr":       "Layer 1+2 — vehicle_dr filter on the synthetic sandbox (sim_drive)",
     "tests.test_pipeline":         "Layer 2 — End-to-end pipeline (unit + full integration)",
     "tests.test_json_schema":      "Layer 3 — JSON export schema validation",
 }

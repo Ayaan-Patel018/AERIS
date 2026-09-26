@@ -325,3 +325,30 @@ so only the horizontal accel projection is affected.
 (v̇ = a_fwd − b_a) and the centripetal a_lat update both need φ. Heading (ψ̇ = ω_vert − b_g) does not.
 Note on use of S1: the per-window and whole-drive S1 scans above are phone-only calibration-stability checks (no VBOX, no filter
 scoring), run to know whether a first-200 s φ would stay valid; disclosed here.
+
+
+# Phase B3 — vehicle_dr (option 1: mount-free core, φ-gated aiding)
+Standing rules: ψ is ENU (CCW from East, radians) everywhere inside vehicle_dr; phone course = bearing (CW from North, deg) →
+ψ = π/2 − radians(bearing), wrapped. Tune ONLY on S3b mini-outages (0–200 s); report mean/median/max and leave-one-interval-out (LOO)
+error for tuned parameters; never tune on S1 or on the 200–260 s outage. ESEKF untouched. Push after every commit.
+
+## S0 — sandbox (`backend/sim_drive.py`, tests in `backend/tests/test_vehicle_dr.py`)
+Synthetic drive with known truth in load_smartphone() format (+ V-like truth df). Default: 329 s, straights / 90° turns (R=12 m) /
+stop from 177.4 s to 209.3 s (S3b: ~180–212 s), 37 GNSS fixes every 9 s (4 m noise, held between fixes, speed m/s, course as a
+bearing), 10 Hz IMU: vertical gyro = true rate × scale + bias (−0.008) + noise, horizontal linear accel = forward/lateral accel rotated
+into the phone frame by φ(t) (constant or changed abruptly mid-drive) + bias + vibration noise growing with speed; gravity ≈ (0,0,9.806).
+12 sandbox tests pass (column format, 10 Hz, fix cadence and hold, speed in m/s, bearing convention, kinematic consistency,
+lat/lon round-trip, stop timing, gyro bias/scale, mount rotation, abrupt mount change, vibration growth, determinism).
+
+## Results table (same columns every step)
+S3b mini = mini-outage error (m) over the 20 intervals ending ≤ 200 s: mean / median / max. LOO = leave-one-interval-out mean (parameters
+re-chosen on the other 19 intervals). Outage = the 200–260 s outage, REPORTED ONLY (never tuned): mean / end. Coverage = % of mini-outage
+intervals whose truth lies inside the reported 1σ ellipse (target ≈ 39 %). Truth: displacement 154 m, path ≈ 225 m.
+
+| step | S3b mini mean / median / max | LOO mean | S3b outage mean / end | disp (154) | path (~225) | 1σ coverage (≈39 %) | S1 mini mean | verdict |
+|---|---|---|---|---|---|---|---|---|
+| baseline: hold last fix | 52.95 / 59.55 / 106.70 | – | – | – | – | – | 72.21 | reference |
+| baseline: last fix + const-v (bar) | 34.89 / 39.71 / 73.36 | – | – | – | – | – | 26.67 | **bar to beat** |
+| ESEKF as shipped (interpolated GNSS) | 12.90 / 10.35 / 43.04 | – | 55.02 / 129.56 | 34.0 | 145.4 | 0 % | 10.69 | reference (tracking, not DR) |
+| ESEKF fixes-only (true DR) | 148.02 / 151.96 / 309.49 | – | 282.95 / 359.52 | 165.3 | 447.3 | 0 % | 347.98 | reference |
+| S0 sandbox | n/a | – | – | – | – | – | – | 12 sandbox tests pass |
