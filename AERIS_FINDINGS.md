@@ -189,6 +189,31 @@ D (after approval): OpenStreetMap road-matching (independent map data only, neve
 Start with the plan save + sanity check, then E0. Stop after E0.
 ```
 
+# PRE-REGISTRATION (E0, 2026-09-26): sliding 60 s windows and the S3c event window
+Sanity check before E0 (2026-09-26, HEAD 8a8bbd5): `python backend/check_outage.py S3b --filter vehicle_dr` reproduced the documented state exactly
+(mini 21.93 / 17.11 / 64.85, coverage 50 %, outage mean 64.35 m, end 145.89 m). Windows console note: piping output needs `PYTHONUTF8=1` (a `≈` in a print otherwise raises
+UnicodeEncodeError under cp1252); the numbers are unaffected.
+
+**Rule** (implemented in `backend/window_plan.py`, unit-tested in `backend/tests/test_eval_e0.py`; it reads ONLY the phone file — length and which rows are usable NEW fixes — and the timestamps
+of the reference file; no filter output, no truth position, no error): a window is [start, start + 60 s]; starts on a 10 s grid anchored at drive time 0 (30, 40, 50, ...);
+the window lies inside the drive (start + 60 <= min(last phone time, last V time - S/V offset)); usable fix = NEW phone fix (lat/lon changed, finite) with satellites >= 6 (or unknown);
+the start needs >= 30 s of prior GNSS = a usable fix at or before start - 30 s, >= 2 usable fixes in [start - 30, start] and the newest usable fix no older than 20 s at the start.
+Tuning set of a drive = the windows that END before 200 s (start + 60 < 200). Event window = the S3b demo outage, [200 s, 260 s] (start 200; same absolute timing as CLAUDE.md's demo, chosen before any S3c error exists).
+
+| set | how to regenerate | windows (start times, s) | n | sha1 of the start list |
+|---|---|---|---|---|
+| **S3b tuning (end < 200 s)** | `python backend/window_plan.py S3b --end-before 200` | 30-130 (step 10) | 11 | `8faf6fce490472980ca44498c8ddf8d46d98c887` |
+| **S3c — ALL windows (B5, no retuning)** | `python backend/window_plan.py S3c` | 30-40, 80-900, 930-2020, 2080-2120, 2160-3520, 3580-3650 (each range step 10) | 345 | `96375f11488107d65a1d92bd0edbeed9db5c7973` |
+| **S3c event window (B5, reported once)** | same rule, start 200 | [200, 260] — VALID (>= 30 s of prior GNSS, inside the drive) | 1 | – |
+
+S3c facts used (file length / GNSS availability only): phone 3718.2 s, S/V offset 0.721 s, usable window time span 0-3717.5 s, 391 usable new fixes (first at 0.0 s, last 3710.0 s, median spacing 9.0 s, longest gap 60.0 s).
+S3c grid starts excluded by the availability rule (GNSS holes in the phone file): 50-70, 910-920, 2030-2070, 2130-2150, 3530-3570. S3b: none excluded.
+No S3c filter output, truth position or error has been computed or looked at; loading S3c for this plan touched only timestamps and GNSS availability. At B5 the B0 time-alignment check
+(phone GNSS vs V per fix; needed before scoring a new drive) is the first thing that will look at S3c/V positions.
+Guard (to be added in the next E0 commit, together with the scoring code): `check_outage.py` refuses to score S3c / S3a / S2 / S4 without `--unseal`.
+Honesty note on the S3b tuning windows: 11 windows spaced 10 s apart and lasting 60 s overlap heavily and cover only 30-190 s of driving, i.e. about 2.7 independent 60 s stretches. Their median/p90 are a thin
+tuning signal; expect a flat error surface, use leave-one-window-out only as a weak overfitting check, and do not over-read differences of a few metres.
+
 ---
 
 
