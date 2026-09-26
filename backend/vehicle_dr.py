@@ -106,6 +106,15 @@ class VDRParams:
     rw_v_aided: float = 1.0          # m/s/√s speed noise while v is propagated from accel
     aided_w_max: float = 0.10        # rad/s: forward-accel aiding only while |omega - b_g| is below this (centripetal leakage)
     aided_max_s: float = 0.0           # forward-accel propagation stops this long after the launch is accepted (speed then held)
+    # B3c — mount-free centripetal speed: |mean a_h| ~ sqrt((v*omega)^2 + a_res^2) in steady turns
+    use_centripetal: bool = False    # B3c FAILED on S3b (see AERIS_FINDINGS.md): off by default; proven on the sandbox only
+    cent_w_min: float = 0.15         # rad/s  only in a real turn
+    cent_steady: float = 0.10        # rad/s  |omega(now) - omega(1 s ago)| below this = steady turn
+    cent_every: int = 5              # samples between updates (0.5 s windows do not overlap)
+    cent_v_min: float = 1.0          # m/s
+    sigma_cent: float = 1.0          # m/s²   measurement noise (inflated: forward accel + vibration + phone frame)
+    cent_res: float = 0.6            # m/s²   residual-acceleration floor in the model
+    cent_bg_coupling: bool = False   # False: omega is treated as known, so the update cannot steer the gyro bias
     # initial covariance (std devs)
     p0_pos: float = 5.0
     p0_psi: float = np.pi
@@ -189,7 +198,7 @@ class _EKF:
         self.psi_ready = False
         self.consec_pos_rej = 0
         self.gate_log = []
-        self.counts = {"pos": [0, 0], "speed": [0, 0], "course": [0, 0]}   # [accepted, rejected]
+        self.counts = {"pos": [0, 0], "speed": [0, 0], "course": [0, 0], "cent": [0, 0]}   # [accepted, rejected]
 
     # ── time update ───────────────────────────────────────────────────────────
     def predict(self, dt, omega, stationary, a_fwd=None):
@@ -312,6 +321,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
     rest_sum, rest_cnt, stat_start = np.zeros(2), 0, None
     pending = None
     quiet_run, dep_run = 0, 0
+    b_h_last = np.zeros(2)                          # last rest baseline of the phone-frame horizontal accel
     block_until = -1e9                              # no re-entry into standstill while a launch is being measured
     t_accept = -1e9
     REST_DELAY = 12                                 # rest baseline uses samples older than 1.2 s
@@ -365,6 +375,8 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
             stat_start, rest_sum, rest_cnt = i, np.zeros(2), 0
         if stationary and stat_start is not None and i - REST_DELAY >= stat_start:
             rest_sum += (ax[i - REST_DELAY], ay[i - REST_DELAY]); rest_cnt += 1
+            if rest_cnt >= p.launch_min_rest:
+                b_h_last = rest_sum / rest_cnt
 
         # ── B3b: evaluate the launch once its window (release + 2 s) is complete ──
         if pending is not None and i >= pending["i_rel"] + p.launch_n_after:
@@ -433,6 +445,21 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
             H1 = np.zeros((1, 6)); H1[0, 4] = 1.0
             ekf.update(np.array([wv[i] - ekf.x[4]]), H1, np.array([[p.sigma_zaru ** 2]]), 1, "zaru", t, gated=False)
             zaru_count += 1
+
+        # ── B3c: mount-free centripetal speed (IMU only, so it also works inside a GNSS outage) ──
+        if p.use_centripetal and not stationary and i >= 15 and i % p.cent_every == 0 and ekf.x[3] > p.cent_v_min:
+            ws = float(wv[i - 4:i + 1].mean() - ekf.x[4])
+            ws_prev = float(wv[i - 14:i - 9].mean() - ekf.x[4])
+            if abs(ws) > p.cent_w_min and abs(ws - ws_prev) < p.cent_steady:
+                a_vec = np.array([ax[i - 4:i + 1].mean(), ay[i - 4:i + 1].mean()]) - b_h_last
+                z = float(np.linalg.norm(a_vec))
+                v = float(ekf.x[3])
+                h = float(np.sqrt((v * ws) ** 2 + p.cent_res ** 2))
+                Hc = np.zeros((1, 6))
+                Hc[0, 3] = v * ws * ws / h
+                Hc[0, 4] = (-v * v * ws / h) if p.cent_bg_coupling else 0.0
+                ok = ekf.update(np.array([z - h]), Hc, np.array([[p.sigma_cent ** 2]]), 1, "cent", t)
+                ekf.counts["cent"][0 if ok else 1] += 1
 
         # ── record ───────────────────────────────────────────────────────────
         E, N = ekf.x[0], ekf.x[1]

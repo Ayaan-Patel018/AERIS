@@ -391,5 +391,57 @@ class TestLaunchEvaluator(unittest.TestCase):
         self.assertFalse(ev["accepted"])
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# B3c — mount-free centripetal speed (FAILED on real S3b, so OFF by default; proven here on the sandbox)
+# ─────────────────────────────────────────────────────────────────────────────
+class TestCentripetalSpeed(unittest.TestCase):
+    """Sandbox pass criteria: speed error in turns decreases, mini-outage not worse, honest coverage, works inside an outage
+    (IMU-only), fires only in real turns. Real-S3b result: no improvement -> the flag defaults to False."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.runs = {}
+        for sd in (0, 1, 2):
+            s, tr = simulate(SimConfig(seed=sd))
+            cls.runs[sd] = (s, tr,
+                            vehicle_dr.run_pipeline(s, None, outage_window=(200.0, 260.0),
+                                                    params=_replace(vehicle_dr.VDRParams(), use_centripetal=False)),
+                            vehicle_dr.run_pipeline(s, None, outage_window=(200.0, 260.0),
+                                                    params=_replace(vehicle_dr.VDRParams(), use_centripetal=True)))
+
+    def test_default_is_off_because_it_failed_on_real_data(self):
+        self.assertFalse(vehicle_dr.VDRParams().use_centripetal)
+
+    def test_speed_error_in_turns_decreases(self):
+        for sd, (s, tr, off, on) in self.runs.items():
+            k = np.arange(1, len(off["velocities"]) + 1)
+            m = (np.abs(tr.omega.values[k]) > 0.15) & (tr.timestamp_s.values[k] < 200.0)
+            e0 = np.mean(np.abs(np.array(off["velocities"])[m] - tr.v.values[k][m]))
+            e1 = np.mean(np.abs(np.array(on["velocities"])[m] - tr.v.values[k][m]))
+            self.assertLess(e1, 0.8 * e0, (sd, e0, e1))
+
+    def test_mini_outage_not_worse_and_coverage_honest(self):
+        covs = []
+        for sd, (s, tr, off, on) in self.runs.items():
+            m0 = np.mean([r["aeris"] for r in check_outage.mini_outage(off, s, tr, 0.0, t_max=200.0)])
+            rows = check_outage.mini_outage(on, s, tr, 0.0, t_max=200.0)
+            self.assertLess(np.mean([r["aeris"] for r in rows]), m0, sd)
+            covs.append(100 * np.mean([r["inside"] for r in rows]))
+        self.assertTrue(25.0 <= np.mean(covs) <= 70.0, covs)
+
+    def test_works_inside_the_outage_because_it_is_imu_only(self):
+        on = self.runs[0][3]
+        times = [g[0] for g in on["gate_log"] if g[1] == "cent"]
+        self.assertTrue(any(200.0 <= t <= 260.0 for t in times))
+
+    def test_fires_only_in_real_turns(self):
+        s, tr, off, on = self.runs[0]
+        times = np.array([g[0] for g in on["gate_log"] if g[1] == "cent"])
+        k = np.clip(np.round(times / 0.1).astype(int), 0, len(tr) - 1)
+        om = np.abs(tr.omega.values[k])
+        self.assertGreater(len(times), 5)
+        self.assertGreater(np.mean(om > 0.1), 0.9)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -356,6 +356,8 @@ intervals whose truth lies inside the reported 1σ ellipse (target ≈ 39 %). Tr
 | B3b spec: launch φ, strict |ω| < 0.05, accel propagated until next standstill | 22.46 / 17.32 / 65.23 | – | – | – | – | – | n/a | **FAIL (no-op)**: all 5 S3b launches rejected as "turning" (max |ω| 0.3–0.6 rad/s: urban junction launches) |
 | B3b turn-compensated + accel propagated until next standstill (no cap) | 33.89 / 26.69 / 100.45 | – | – | – | – | 40 % | n/a | **worse — reverted** (first version, no turn gate: 48.55 / 36.20 / 178.72) |
 | **B3b** turn-compensated launch φ, **replay only** (aided_max_s = 0) | **21.93 / 17.11 / 64.85** | 22.12 | 64.35 / 145.89 | 75.5 | 104.9 | 50 % (LOO 45 %) | n/a (not allowed) | **PASS, marginal** (−0.53 m = −2.4 % vs B3a; 2 launches in the tuning window). Outage path 0.2 → 105 m, disp 0.1 → 75.5 m (reported, not tuned) |
+| B3c centripetal speed, defaults (σ 1.0, res 0.6) | 22.74 / 21.11 / 46.26 | – | 86.13 / 154.76 | 155.0 | 249.6 | 35 % | n/a | worse than B3b on the mean/median |
+| **B3c** centripetal speed, best S3b grid point (σ 4.0, res 0.3 — update nearly off) | 22.12 / 17.64 / 62.28 | 23.75 | 72.22 / 163.16 | 115.9 | 159.5 | 45 % (LOO 40 %) | n/a | **FAIL — reverted (`use_centripetal=False` default)**: no setting beats B3b (21.93); speed error in turns 1.81 → 1.73 m/s only |
 
 ### B3a — vehicle_dr core (`backend/vehicle_dr.py`, `backend/tune_vehicle_dr.py`)
 State [E, N, ψ, v, b_g, b_a]; ψ ENU radians (CCW from East), phone bearing → ψ = π/2 − radians(bearing) (unit-tested: cardinals, 45°,
@@ -421,3 +423,17 @@ length only 0.49 (histogram over 30° bins from −180°: 0,3,3,7,3,8,1,2,0,3,1,
 (−87°, −30°, −84°, −89°); later ones scatter (+8°, +98°, −53°, +142°, −21°, −104°, −20°, −8°), some near +100°…+140° (possibly reversing). Only roughly 40 % of accepted S1
 launches fall within ±30° of B2's φ, so launch φ is a weaker signal on real data than in the sandbox — one more reason it is used only to seed the speed.
 Outage (reported, not tuned): mean 64.35 m, end 145.89 m, path 104.9 m, displacement 75.5 m, |Δyaw| 288° (truth 676°), inside 1σ 20.3 %, σ at 260 s = 268 m.
+
+### B3c — mount-free centripetal speed — FAILED on S3b, switched off by default
+Update: every 0.5 s in steady turns (|ω − b_g| > 0.15 rad/s, |Δω over 1 s| < 0.10), z = |mean(a_h) − b_h| over 0.5 s, model h = √((v·(ω−b_g))² + a_res²) (a_res = residual floor
+for forward accel + vibration = the "inflate" the spec allows), σ_cent, chi-square gate, IMU-only (so it also runs inside a GNSS outage). Sandbox (3 seeds): mini-outage 15.5 → 11.2–12.1 m,
+speed error in turns 4.0 → 1.9–2.0 m/s, coverage 64–68 %, updates fire inside the outage window and only in real turns (5 new tests).
+Real S3b, grid σ_cent {0.5,1,1.5,2.5,4} × a_res {0.3,0.6,1,1.5} (S3b mini-outages only): NO point beats B3b (21.93 / 17.11 / 64.85). The lowest is σ_cent = 4 (update nearly switched off) at
+22.12 / 17.64 / 62.28, LOO 23.75; at σ_cent = 1 it is 22.74 / 21.11 / 46.26 with coverage 35 %. Speed error in turns (VBOX used only to score): 1.81 m/s (B3b) → 1.75 (σ 1) / 1.73 (σ 2).
+Diagnosis (VBOX speed used as a diagnostic reference only, never as an input): the signal itself IS good on S3b in steady turns — corr(|a_h − b_h|, |v·ω|) = 0.88, ratio 1.05, residual
+std 0.45–0.51 m/s², implied speed z/|ω| error 0.76 m/s mean (median 0.57) — but only 45 steady-turn blocks (of ~442 turn samples) exist before 200 s. Relaxing the gate to use most turn samples
+(steady < 0.25/0.6 rad/s, every 2–3 samples) lowers the speed error in turns to 1.65–1.68 m/s (−9 %) yet RAISES the mini-outage error to 22.5–25.0 m and the overall speed error 2.52 → 2.55–2.69 m/s: braking into and
+accelerating out of junctions adds forward acceleration to |a_h| that the residual floor does not capture. Cutting the update's path into b_g changed nothing (22.74 → 22.74). Not a bug: a physically
+sound measurement that this speed-held filter cannot exploit better than it already does on S3b.
+Reported, not tuned: with the update on (σ 1.0) the 200–260 s outage SHAPE is much better (path 249.6 m vs truth 225.7, displacement 155.0 m vs 154.0) while the mean error is worse (86.1 m vs 64.4 m).
+Rule applied: fails "S3b mini-outage improves vs previous step" → off by default; code and sandbox tests kept.
