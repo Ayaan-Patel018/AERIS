@@ -29,8 +29,10 @@ VBOX is for scoring only. No snapping to the true path.
 - Keep the reply tables compact; put the details in `AERIS_FINDINGS.md`.
 - Before any /clear: update the handoff section of `AERIS_FINDINGS.md` (current defaults, flags, latest table, next step), commit, push.
 
-## Drive registry
-- S3b: tuning drive. Tune ONLY on data/windows that end before 200 s. The 200–260 s event is reported, never tuned on.
-- S2, S4: training drives, ONLY for fitting the I3 vibration model offline. Never report accuracy on them as validation.
-- S3c: final validation, untouched until B5 (no looking at its errors before then).
-- S1: "previously inspected", secondary report only. S3a: reserve, untouched.
+## Drive registry (v2, 2026-09-26)
+- S3b: development drive. Tune ONLY on data/windows that end before 200 s. The 200–260 s event is reported, never tuned on.
+- S2: development drive too — tuning allowed alongside S3b; report S3b and S2 separately and pooled. Also an I3 training drive.
+- S4: I3 vibration-model training ONLY (never scored).
+- S3c: final validation, sealed until B5 (no looking at its errors before then). S3a: reserve, sealed.
+- S1: "previously inspected", secondary report only, never tuned on.
+- Noise rule: windows overlap; a change < 5 % on the median end error is "no change". Keep a change only if it helps S3b AND S2 (or helps one and is neutral on the other).

@@ -16,7 +16,7 @@ E0 additions (the older output above is unchanged):
   4. SLIDING 60 s OUTAGES (vehicle_dr only): a simulated 60 s GNSS outage every 10 s wherever the drive allows
      (window plan in window_plan.py), scored against the truth with along/cross, path ratio and speed error, next to
      the constant-velocity and hold baselines. Default on S3b = the tuning set (windows that END before 200 s).
-Reserved drives (S3c final validation, S3a reserve, S2/S4 training) are not scored without --unseal.
+Reserved drives (S3c final validation, S3a reserve, S4 training) are not scored without --unseal.
 
 Usage:
     python backend/check_outage.py                       # S3b, esekf
@@ -40,7 +40,7 @@ OUTAGE = (200.0, 260.0)
 FILTERS = ("esekf", "vehicle_dr")
 WINDOW_S = window_plan.LENGTH_S
 RESERVED = {"S3c": "final validation drive (B5)", "S3a": "reserve drive",
-            "S2": "I3 training drive", "S4": "I3 training drive"}
+            "S4": "I3 training drive (never scored)"}       # registry v2: S2 became a development drive
 
 
 def load_drive(drive):
@@ -495,6 +495,6 @@ if __name__ == "__main__":
     ap.add_argument("--windows", choices=("auto", "tuning", "all", "off"), default="auto",
                     help="sliding 60 s outages (vehicle_dr): auto = S3b tuning set only; all = every valid window (slow on long drives)")
     ap.add_argument("--per-window", action="store_true", default=None, help="list every window (default: only when <= 20)")
-    ap.add_argument("--unseal", action="store_true", help="allow scoring a reserved drive (S3c/S3a/S2/S4) — only when its step is due")
+    ap.add_argument("--unseal", action="store_true", help="allow scoring a reserved drive (S3c/S3a/S4) — only when its step is due")
     a = ap.parse_args()
     main(a.drive, a.filter, a.fixes_only, a.mini_only, a.windows, a.unseal, a.per_window)

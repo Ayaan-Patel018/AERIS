@@ -135,7 +135,18 @@ mean speed error 4.71 / 4.61 / 5.86 m/s; path ratio 0.96 / 1.08 / 1.48; 1-sigma 
 
 ---
 
-# DRIVE REGISTRY (declared 2026-09-26, before any E0 run; supersedes the "untouched drives" advice above)
+# DRIVE REGISTRY v2 (2026-09-26, after the E0 review — CURRENT; v1 below is kept for history)
+| drive | role | rules |
+|---|---|---|
+| **S3b** | development drive (primary) | Tune ONLY on windows / data that end before 200 s (11 windows, starts 30-130; 20 mini-outage intervals). The 200-260 s event is reported, never tuned on. |
+| **S2** | **development drive (NEW)** | Tuning allowed, alongside the S3b pre-200 s windows. Report S3b and S2 SEPARATELY and pooled. Its window list is pre-registered (same planner rule) before S2 is scored. Also an I3 training drive. |
+| **S4** | I3 training only | Used ONLY for fitting the I3 vibration model offline. Never scored, never reported as accuracy. |
+| **S3c** | final validation (sealed) | Untouched until B5; the window list and event window are pre-registered; `--unseal` guard. |
+| **S3a** | reserve (sealed) | Untouched; `--unseal` guard. |
+| **S1** | "previously inspected" | Secondary report only; never tuned on. |
+Change rule ("noise rule"): windows overlap, so a change < 5 % of the median end error counts as "no change"; keep a change only if it helps S3b AND S2, or helps one and is neutral on the other.
+
+# DRIVE REGISTRY v1 (declared 2026-09-26, before any E0 run; SUPERSEDED by v2 above for S2)
 | drive | role | rules |
 |---|---|---|
 | **S3b** | tuning drive | Tuning uses ONLY data/windows that end before 200 s. The 200-260 s event is reported, never tuned on. |
@@ -244,6 +255,52 @@ No S3c filter output, truth position or error has been computed or looked at; lo
 Guard (implemented in the E0 scoring commit, unit-tested): `check_outage.py` refuses to score S3c / S3a / S2 / S4 without `--unseal`.
 Honesty note on the S3b tuning windows: 11 windows spaced 10 s apart and lasting 60 s overlap heavily and cover only 30-190 s of driving, i.e. about 2.7 independent 60 s stretches. Their median/p90 are a thin
 tuning signal; expect a flat error surface, use leave-one-window-out only as a weak overfitting check, and do not over-read differences of a few metres.
+
+# E0 review (external sandbox study) — 2026-09-26, after the user's review of E0
+E0 was reviewed and ACCEPTED, including the decisions: strict "end before 200 s", S3c event = [200, 260] s, the `--unseal` guard, the CLAUDE.md edits.
+* E0 shows that at 60 s vehicle_dr's end error ≈ hold-last-fix (161 vs 156 m), and the error is mostly CROSS-track (122 vs 76 m along), with path ratio ≈ 1 on the tuning windows.
+  So heading / turn shape dominates, not speed (speed dominates only in the 200-260 s event, which starts from a stop).
+* Suspect: gyro scale factor. The A2 slope on S3b was 1.29 (S1 0.94). vehicle_dr has no scale state; turn_noise = 0.5 only hides it.
+* An external sandbox study (sim_drive `long_route`, 60 s windows, seeds 1-2) found: gyro_scale 1.3 raises the median end error from ~110-116 m to 168-188 m (cross 74-80 -> 121-129 m). A CAUSAL scale
+  estimate — regressing the GNSS course change between consecutive new fixes (|dcourse| > 20 deg, both speeds > 3 m/s) on the integrated vertical gyro over the same interval, past fixes only, n ~ 9 —
+  recovered the scale within ~3-4 % and restored ~oracle error (end 110-115, cross 74-81). Harmless when scale = 1.0.
+* POLICY CHANGE: registry v2 above (S2 = development drive, S4 = I3 training only, S3c / S3a sealed, S1 secondary; S2 window list pre-registered before S2 is scored).
+* NEW ORDER (supersedes the old I-order of the plan; the old plan text above is kept for history): H1 gyro-scale calibration -> I1a latency -> I1b robustness -> I2 speed -> I3 vibration speed.
+  The user's message with the full H1 / I1 / I2 / I3 specification and the new metric table is copied verbatim in the next section.
+
+# PLAN UPDATE: NEW ORDER H1 → I1 → I2 → I3 (verbatim copy of the user's message, 2026-09-26)
+```text
+Read CLAUDE.md and AERIS_FINDINGS.md fully first. E0 reviewed and accepted, including your decisions (strict "end before 200 s", S3c event = [200,260], the --unseal guard, CLAUDE.md edits).
+
+Log the following review in AERIS_FINDINGS.md under "E0 review (external sandbox study)" before starting:
+- E0 shows that at 60 s vehicle_dr's end error ≈ hold-last-fix (161 vs 156 m), and the error is mostly CROSS-track (122 vs 76 m along), with path ratio ≈1 on the tuning windows. So heading/turn shape dominates, not speed (speed dominates only in the 200–260 s event, which starts from a stop).
+- Suspect: gyro scale factor. The A2 slope on S3b was 1.29 (S1 0.94). vehicle_dr has no scale state; turn_noise=0.5 only hides it.
+- An external sandbox study (sim_drive long_route, 60 s windows, seeds 1–2) found: gyro_scale 1.3 raises the median end error from ~110–116 m to 168–188 m (cross 74–80 → 121–129 m). A CAUSAL scale estimate — regressing the GNSS course change between consecutive new fixes (|Δcourse| > 20°, both speeds > 3 m/s) on the integrated vertical gyro over the same interval, past fixes only, n≈9 — recovered the scale within ~3–4% and restored ~oracle error (end 110–115, cross 74–81). Harmless when scale = 1.0.
+
+POLICY CHANGE (update the drive registry): S2 becomes a DEVELOPMENT drive — tuning allowed, alongside the S3b pre-200 s windows (report both separately and pooled). S4 stays I3-training-only. S3c and S3a stay sealed. S1 stays secondary. Pre-register the S2 window list (same planner rule) before scoring S2.
+
+NEW ORDER (supersedes the old I-order in the plan; keep the old plan text for history):
+
+H1 — Gyro scale calibration (targets cross-track)
+ H1a Causal regression estimator: at each new fix, using ONLY past new-fix pairs in the last W seconds (grid W ∈ {120, 300, all}) with both speeds > 3 m/s and |Δcourse| > 20°: y = wrap(ψ_course(b) − ψ_course(a)) (ψ from bearing, ENU, CCW), x = ∫(ω_vert − b_g) dt over [t_a − L, t_b − L] (L = GNSS latency; use L = 0 until I1a exists, then re-run H1 with the I1a value). Robust fit through the origin (Huber or Theil–Sen), s = x·y-fit slope → correction k = 1/s. Accept only with ≥ 5 pairs and k ∈ [0.7, 1.4]; otherwise k = 1. Apply ω_used = k·(ω_vert − b_g).
+ H1b EKF alternative: add state s_g (ψ̇ = (1+s_g)(ω − b_g)), prior σ 0.1, random walk tiny; observable through the course/position updates. Compare H1a vs H1b; keep the better (or both, if they combine safely).
+ After the better one: retune turn_noise down (grid {0.5, 0.3, 0.15, 0.05}), since it was compensating for the scale.
+ Sandbox pass: with gyro_scale 1.3 on long_route, the estimated scale is within 5% after 200 s, and the median 60 s-window end error is within 10% of the oracle (the gyro column divided by the true scale). With gyro_scale 1.0, no worse than the current default by more than 3%.
+ Real report: the estimated k over time on S3b (plot/print), and the final k on S3b, S2 (and S1 secondary). If k on S3b is far from the A2 slope of 1.29, explain why.
+
+I1a — GNSS latency L (as in the saved plan), tuned on the development windows. Then re-run H1 with L.
+I1b — Robust GNSS: course failsafe + divergence reset with the two-fix consistency check, vs Huber (as in the saved plan). Sandbox: a 60° heading error and a 50 m jump recover within 2 fixes; a single 80 m outlier is not accepted. Report the rejection counts on S3b, S2, S1 (S1 secondary).
+I2 — Speed (as in the saved plan: I2a OU prior, I2b turn ceiling as an inequality only). Tune on the development windows. ALSO report separately the development windows that START within 10 s after an IMU standstill (the "launch-from-stop" regime, like the event), since that is where I2a should matter.
+I3 — Vibration speed (as in the saved plan), trained on S2 + S4, BUT: since S2 is now also a development drive, report the I3 R² on S3b pre-200 fixes as the honest check.
+
+METRICS for every row (compact table):
+step | dev windows S3b: median end / p90 end / median cross@end / median along@end | dev windows S2: same | S3b mini mean | launch-from-stop windows median end | 200–260 s event mean/end/path ratio (report only) | 1σ coverage | verdict.
+Also always show the hold-last-fix and const-v rows on the same windows. The target is to beat hold's end error clearly.
+
+Noise rule: the windows overlap. Treat any change < 5% on the median end error as "no change". Keep a change only if it helps S3b AND S2 (or helps one and is neutral on the other).
+
+Stop and show the table after H1 (including k over time), then continue to I1a/I1b only when I say "go".
+```
 
 ---
 

@@ -218,11 +218,11 @@ class TestAlongCross(unittest.TestCase):
 
 class TestReservedDriveGuard(unittest.TestCase):
     def test_reserved_drives_are_refused_without_unseal(self):
-        for d in ("S3c", "S3a", "S2", "S4"):
+        for d in ("S3c", "S3a", "S4"):
             with self.assertRaises(SystemExit):
                 check_outage.guard_drive(d)
             check_outage.guard_drive(d, unseal=True)
-        for d in ("S3b", "S1"):
+        for d in ("S3b", "S1", "S2"):                              # S2 became a development drive (registry v2)
             check_outage.guard_drive(d)
 
 
