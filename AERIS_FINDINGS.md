@@ -256,6 +256,19 @@ Guard (implemented in the E0 scoring commit, unit-tested): `check_outage.py` ref
 Honesty note on the S3b tuning windows: 11 windows spaced 10 s apart and lasting 60 s overlap heavily and cover only 30-190 s of driving, i.e. about 2.7 independent 60 s stretches. Their median/p90 are a thin
 tuning signal; expect a flat error surface, use leave-one-window-out only as a weak overfitting check, and do not over-read differences of a few metres.
 
+# PRE-REGISTRATION (registry v2, 2026-09-26): S2 development windows — registered BEFORE S2 is scored
+Same planner rule as above (`backend/window_plan.py`; reads only the phone file's fix availability and the file time spans; no filter output, no truth position, no error).
+Generated with `python backend/window_plan.py S2`. S2 is a development drive: ALL registered windows are tuning/report windows (S2 has no "end before 200 s" restriction), reported separately from and pooled with the S3b dev windows.
+
+| set | windows (start times, s; each range step 10) | n | sha1 of the start list |
+|---|---|---|---|
+| **S2 development windows (all valid)** | 30-120, 140-160, 190-300, 450-1250, 1280-1360, 1450-2690, 2720-2870, 2980-3110, 3140-3370, 3410-3490, 3520-3550, 3600-4000, 4080-4260, 4290-7320, 7430-9320 | 861 | `b1049dca2734856fa9a9f4bafa4bf702740de305` |
+
+S2 facts used (file length / GNSS availability only): phone 9388.6 s, S/V clock offset 7.341 s (S3b 0.693, S3c 0.721, S1 0.546 — S2's is larger; checked by the B0 time-alignment check below), usable window time span 0-9380.2 s,
+941 usable new fixes (first at 0.0 s, last 9376.2 s, median spacing 9.0 s, longest gap 146.0 s). Grid starts excluded by the availability rule (GNSS holes): 130, 170-180, 310-440, 1260-1270, 1370-1440, 2700-2710, 2880-2970,
+3120-3130, 3380-3400, 3500-3510, 3560-3590, 4010-4070, 4270-4280, 7330-7420. The 200-260 s window is valid on S2 (start 200) but is just one of the 861 windows here.
+No vehicle_dr output, truth position or error of S2 had been computed when this was registered. If the B0 check below finds a timeline defect that changes this list, the amendment is logged with the reason (still before any S2 scoring).
+
 # E0 review (external sandbox study) — 2026-09-26, after the user's review of E0
 E0 was reviewed and ACCEPTED, including the decisions: strict "end before 200 s", S3c event = [200, 260] s, the `--unseal` guard, the CLAUDE.md edits.
 * E0 shows that at 60 s vehicle_dr's end error ≈ hold-last-fix (161 vs 156 m), and the error is mostly CROSS-track (122 vs 76 m along), with path ratio ≈ 1 on the tuning windows.
