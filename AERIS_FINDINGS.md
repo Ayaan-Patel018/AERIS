@@ -104,6 +104,93 @@ truth inside 1-sigma 20.3 %, sigma at 260 s = 268 m, gap last fix -> AERIS at 20
 
 ---
 
+# DRIVE REGISTRY (declared 2026-09-26, before any E0 run; supersedes the "untouched drives" advice above)
+| drive | role | rules |
+|---|---|---|
+| **S3b** | tuning drive | Tuning uses ONLY data/windows that end before 200 s. The 200-260 s event is reported, never tuned on. |
+| **S2, S4** | training drives | Used ONLY for fitting the I3 vibration model offline. Accuracy on them is never reported as validation. |
+| **S3c** | final validation | Untouched until B5. No looking at its errors before then (phone file length / GNSS availability only, for pre-registration). |
+| **S1** | "previously inspected" | Secondary report only. |
+| **S3a** | reserve | Untouched. |
+
+# PLAN: E0 → D (issued after B3d review)
+Verbatim copy of the user's plan message (2026-09-26). E0 was the next step; this section defines E0 and everything after it. Stop points: after E0 (show S3b tuning-window
+summary + along/cross split of the 200-260 s event), after I3 (show the table). I4-I6, B4, B5, C, D only when the user says "go next".
+
+```text
+E0 and the full plan are defined below. FIRST: copy this entire message into AERIS_FINDINGS.md under a heading "PLAN: E0 → D (issued after B3d review)" so future fresh sessions have it, commit and push. SECOND: run your sanity check (check_outage.py S3b --filter vehicle_dr must reproduce mini 21.93 / 17.11 / 64.85 and outage 64.35 / 145.89). If it doesn't reproduce, stop and tell me. THEN start E0.
+
+Reviewed B3a–B3d: accepted. vehicle_dr is the main filter from now on. ESEKF stays untouched as the baseline.
+
+═════ STANDING RULES (add to CLAUDE.md) ═════
+- Branch fix/heading-spin only. Commit per step and PUSH after every commit.
+- Every step: (1) sandbox test first (sim_drive.py) with an explicit pass criterion, (2) real-data metrics, (3) row appended to the results table in AERIS_FINDINGS.md, (4) full test suite passes, (5) commit + push. If a step fails its criterion: keep the code behind a flag set to OFF, log why, and move on.
+- Never use V-*.csv or VBOX-derived values as a filter input. VBOX is for scoring only.
+- Keep the reply tables compact; put the details in AERIS_FINDINGS.md.
+- Before any /clear: update the handoff section of AERIS_FINDINGS.md (current defaults, flags, latest table, next step), commit, push.
+
+DRIVE REGISTRY (declare this in AERIS_FINDINGS.md now, before running anything):
+- S3b: tuning drive. Tuning uses ONLY data/windows that end before 200 s. The 200–260 s event is reported, never tuned on.
+- S2, S4: training drives, used ONLY for fitting the I3 vibration model offline. Never report accuracy on them as validation.
+- S3c: final validation, untouched until B5. No looking at its errors before then.
+- S1: "previously inspected". Secondary report only.
+- S3a: reserve, untouched.
+
+═════ E0 — EVALUATION UPGRADE (do this first) ═════
+Extend check_outage.py (keep the existing output):
+a) Along-/cross-track error: at each epoch, project (AERIS − truth) onto the truth's unit direction of travel (along) and its left normal (cross). Report mean |along|, mean |cross|, and both at the end of the outage.
+b) Speed diagnostics during the outage: AERIS vs truth speed (mean abs error, and at +30 s and +60 s), path ratio = AERIS path / truth path.
+c) Sliding 60 s outage benchmark: simulate 60 s outages starting every 10 s wherever the drive allows (the start needs ≥ 30 s of prior GNSS; a window must lie inside the drive). For each window report: mean error, end error, along/cross at the end, path ratio. Summarise the median, mean and p90 over windows.
+   - TUNING set: S3b windows that END before 200 s.
+   - VALIDATION sets: S3c (B5 only), S1 (secondary).
+   Pre-register the exact S3c window list (start times) in AERIS_FINDINGS.md NOW, derived only from the file length and the GNSS availability, not from any error. Also pre-register one S3c "event" window equivalent to S3b's 200–260 s (same rule, chosen before seeing any error).
+d) Score the current vehicle_dr default and the constant-velocity baseline on the S3b tuning windows. This is the new reference row.
+Stop after E0: show the S3b tuning-window summary and the along/cross split of the 200–260 s event.
+
+═════ I1 — GNSS TIMING AND ROBUSTNESS ═════
+I1a Latency: estimate the GNSS latency L (grid 0–1.5 s, step 0.1 s) using ONLY S3b data before 200 s, by minimising the mini-outage error, or the innovation magnitude, with the filter compensating: keep a ring buffer of past states; compute the position/course innovations against the state at (t_fix − L); apply the correction to the current state (the standard small-lag approximation; document it). Report L for S3b (and just report, not tune, for S1).
+I1b Robustness:
+  - Course failsafe: after N consecutive course rejections at speed > 5 m/s, accept the next course if two consecutive fixes agree with each other (the bearing between them is within 20° of the reported course, and the implied speed is ≤ 40 m/s); log "forced".
+  - Divergence reset: if position or course is rejected K times in a row, inflate P before the next update (ψ σ → 30°, position σ → max(innovation norm, 20 m)) instead of discarding the data. Accept only through the two-fix consistency check.
+  - Compare against a Huber-weighted update (no hard gate); keep the better one on S3b.
+  Sandbox: inject a 60° heading error and a 50 m position jump mid-drive; pass = recovery within 2 fixes, and a single 80 m multipath outlier fix is NOT accepted.
+  Report the rejection counts on S3b, and on S1 (secondary; no tuning on S1).
+
+═════ I2 — SPEED DURING OUTAGES (tune ONLY on the S3b sliding 60 s tuning windows) ═════
+I2a Ornstein–Uhlenbeck speed prior (mount-free, causal):
+  While moving (IMU not stationary) and without a GNSS speed: v_{k+1} = v̄ + (v_k − v̄)·e^(−dt/τ), with process variance σ_v²·(1 − e^(−2dt/τ)) and F[3,3] = e^(−dt/τ).
+  v̄ = the median of GNSS speeds from NEW fixes with speed > 2 m/s in the last W seconds (causal); σ_v = the std of those speeds (floor 1 m/s). If there are fewer than 3 such fixes, fall back to holding v.
+  Grid: τ ∈ {5,10,20,40,80} s, W ∈ {60,120,300} s. Report the path ratio and along-track error on the tuning windows.
+  Label in code and docs: "speed prior from recent driving", not a measurement.
+I2b Turn speed ceiling (the fixed version of B3c): when |ω−b_g| > 0.15 rad/s, apply a soft update ONLY IF v·|ω−b_g| > |a_h|_1s + m, with the measurement v = (|a_h|_1s + m)/|ω−b_g|, where |a_h|_1s is the 1 s mean horizontal accel magnitude and m is a margin (grid 0.3–1.0 m/s²). Also try a fixed comfort ceiling a_max ∈ {2.5, 3.0, 4.0} m/s² instead of |a_h|. Inequality only: it never pushes v up.
+
+═════ I3 — VIBRATION SPEED (learned offline, adapted online) ═════
+Features (10 Hz, mount-free), per 1 s window: std of |a_h|, std of vertical linear accel, mean |Δa| (sample-to-sample diff) of the horizontal and vertical accel, std of |ω|. Also include a stationary flag.
+Train: ridge regression speed ≈ f(features) on S2 + S4 ONLY (labels = the phone GNSS speed at new fixes; the features from the 1 s before each fix). Save the model file and the training report (R², residual std) in the repo.
+Online on S3b: at each new fix, update a single scale factor k (speed_true ≈ k·f) from past fixes only (recursive least squares with a forgetting factor). Use k·f as a speed measurement every 1 s when not stationary, σ = the residual std from training × (1 + drift term), with a chi-square gate.
+Report: R² of f on S3b pre-200 new fixes (no fitting on S3b), and the tuning-window metrics with and without I3. Try I3 alone and I2a+I3 combined; keep the better one.
+Sandbox: add speed-dependent vibration in sim_drive (already present) and check that the pipeline recovers speed within 20% after the online scale adaptation.
+
+Stop and show the table after I3 (rows: E0 reference, I1a, I1b, I2a, I2b, I3, best combination). Columns: S3b mini mean/median | S3b 60 s tuning windows median/p90 end error | tuning path ratio (median) | along/cross at the end (median) | 200–260 s event mean/end/path ratio (report only) | 1σ coverage | verdict.
+
+═════ LATER (only when I say "go next") ═════
+I4 Gyro scale factor state (prior σ 0.1), then retune turn_noise. I5 Between-fix displacement (stochastic cloning). I6 Magnetometer aid (gated, online offset), lowest priority.
+
+B4: final settings frozen. Ablation table (core, +each kept step). Report the S3b 200–260 s event once.
+B5: S3c pre-registered windows + the pre-registered event window, no retuning. S1 as secondary.
+
+C (demo layer):
+- export_frontend_data.py --filter vehicle_dr (honest; no sim-aided, no map-matching to VBOX); regenerate the dashboard JSONs.
+- An RTS smoother for vehicle_dr as a separate OFFLINE output (post-drive only, labelled as such).
+- Frontend honesty: the outage window read from the export (not hard-coded in useGNSSStatus.ts / TimelineSlider); remove hard-coded fake values (e.g. "LOCKED (11 SATS)" in Sidebar.tsx / StatusPanel.tsx); GNSS hidden during the outage; AERIS drawn from the last GNSS fix.
+- An S3b PNG: truth, phone fixes, vehicle_dr, ESEKF, RTS, outage shaded.
+D (after approval): OpenStreetMap road-matching (independent map data only, never VBOX).
+
+Start with the plan save + sanity check, then E0. Stop after E0.
+```
+
+---
+
 
 All numbers from `python backend/check_outage.py [drive]` unless noted:
 `run_pipeline(s_df, None, mode="full", outage_window=(200,260))`, scored against V-<drive>.csv
