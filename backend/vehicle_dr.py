@@ -86,7 +86,8 @@ class VDRParams:
     launch_sigma_v: float = 1.5      # m/s    speed std restored the moment standstill releases
     gnss_moving_speed: float = 2.0   # m/s    a new fix faster than this clears a standstill flag
     sigma_zupt: float = 0.05         # m/s
-    sigma_zaru: float = 0.01         # rad/s
+    sigma_zaru: float = 0.10         # rad/s  H1c: was 0.01. The IMU-only standstill detector also fires during launches / creeping turns / quiet cruising, and
+                                     #        0.01 rad/s at 10 Hz made b_g follow real rotation (b_g jumps of +-0.006..0.014 rad/s); see AERIS_FINDINGS.md H1c
     # B3b — launch calibration (mount-free forward axis from the first seconds after a standstill)
     use_launch: bool = True
     launch_n_before: int = 8         # samples before the release included (the 1 s variance detector lags the true start)

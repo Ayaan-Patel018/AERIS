@@ -1,12 +1,16 @@
 # AERIS findings log
 
-# START HERE — handoff for a fresh session (state after E0, 242 tests pass / 37 skipped; vehicle_dr defaults UNCHANGED since 22ec79f)
+# START HERE — handoff for a fresh session (state after H1 + H1c, 266 tests pass / 37 skipped; ONE default changed since 22ec79f: sigma_zaru 0.01 -> 0.10)
 
-**E0 (evaluation upgrade) is DONE and reported; the user reviews it before anything else.** The full plan E0 → D is saved verbatim below under "PLAN: E0 → D" — read it, plus the
-"DRIVE REGISTRY" and "PRE-REGISTRATION" sections right after it. **Next step: I1a (GNSS latency), then I1b (robustness), then I2, I3 — only after the user says to continue**
-(the plan stops after E0 and again after I3, where the table below must be shown). I4-I6, B4, B5, C, D wait for "go next".
-Per-step protocol (standing rules): sandbox test with a numeric pass criterion first -> real-data metrics -> row in the plan table below -> full suite passes -> commit + push;
-a failed step stays in the code behind a flag set to OFF, with the reason logged.
+**E0 is accepted; H1 (gyro-scale calibration) is DONE and reported; the user reviews it before anything else.** Read, in this order: "DRIVE REGISTRY v2", "E0 review (external sandbox study)", "PLAN UPDATE: NEW ORDER H1 → I1 → I2 → I3"
+(the user's message, verbatim; the older "PLAN: E0 → D" text is kept for history), the two pre-registrations (S3c, S2), then the sections "H0", "H1" and "H1c" at the end of this file.
+**What H1 found:** (1) the gyro-scale hypothesis is REFUTED on real data (scale = 1.00 +/- 0.03 on S3b, S2, S1 by three independent estimators; the A2 "1.29" was two wrap-ambiguous pairs) -> H1a and H1b are correct on the sandbox but stay OFF;
+(2) the real lever was the gyro BIAS: ZARU at false / partial standstills dragged b_g onto real rotation -> wrong heading -> the hard gate rejected the repairing GNSS updates (the S1 "lock-out"). **H1c** (sigma_zaru 0.01 -> 0.10) fixed it:
+S3b dev windows median end 161.5 -> 126.0 m (hold 156.5), S2 (861 windows) 152.3 -> 130.6 m (hold 368.6), S1 mini mean 43.89 -> 16.77 m with the > 100 m tail gone (11.1 % -> 0 %). The event (report only) got 6-9 % worse.
+**Next step: I1a (GNSS latency), then I1b (robustness — the S1 lock-out is already gone, so I1b's job is now a safety net), then I2, I3 — only after the user says "go"** (the plan stops after H1 and again after I3, where the table must be shown).
+I4-I6, B4, B5, C, D wait for "go next". Optional follow-up idea (not started): learn b_g only from CONFIRMED standstills. Reference numbers changed with H1c — compare new work against the H1c row of the plan table below, not the E0 row.
+Per-step protocol (standing rules): sandbox test with a numeric pass criterion first -> real-data metrics (dev windows S3b + S2, noise rule: < 5 % = no change; keep a change only if it helps S3b AND S2 or helps one and is neutral on the other) -> row in the plan table below -> full suite passes -> commit + push;
+a failed step stays in the code behind a flag set to OFF, with the reason logged. Machine is SHARED (a game runs on it): use `dev_eval.py --workers 4` (30 workers ran out of memory), kill orphan python workers after stopping a job.
 
 ## Rules (CLAUDE.md + standing rules)
 * Branch `fix/heading-spin`; never touch `main`; **push after every commit** (`git push origin fix/heading-spin`); never `git stash pop`; one change at a time.
@@ -16,8 +20,8 @@ a failed step stays in the code behind a flag set to OFF, with the reason logged
 * Conventions inside vehicle_dr: psi is ENU, radians, counter-clockwise from East; the phone course field is a BEARING (degrees clockwise from North):
   `psi = pi/2 - radians(bearing)`, wrapped (`bearing_to_psi`, unit-tested).
 * Tuning data = S3b mini-outages (intervals between consecutive NEW phone fixes ending <= 200 s, 20 of them) and, from E0 on, the S3b sliding 60 s windows that END before 200 s
-  (11 windows, starts 30-130). Report mean AND median AND max (windows: median / mean / p90), plus leave-one-out for tuned parameters. S1 and S3c are never tuned on; the 200-260 s
-  event is never tuned on (reported only). **Drive registry:** S3b tuning; S2/S4 training for I3 only; S3c final validation (B5, untouched, guarded by `--unseal`); S1 previously inspected (secondary); S3a reserve.
+  (11 windows, starts 30-130) and, since registry v2, the 861 pre-registered S2 windows (S2 is a development drive). Report medians / p90 (mean where useful). S1 and S3c are never tuned on; the 200-260 s
+  event is never tuned on (reported only). **Drive registry v2:** S3b + S2 development; S4 I3 training only; S3c final validation (B5, sealed, guarded by `--unseal`); S1 previously inspected (secondary); S3a reserve (sealed).
 * Step protocol: (1) sandbox test with a numeric pass criterion, (2) real S3b metrics (mini-outages + tuning windows), (3) row appended to the results table, (4) full test suite, (5) commit + push. A step that fails its
   pass criterion keeps its code behind a feature flag set to OFF (sandbox tests stay), the reason is logged, and work continues.
 * Windows console: pipe output only with `PYTHONUTF8=1` (a `≈` in a print raises UnicodeEncodeError under cp1252).
@@ -28,7 +32,7 @@ a failed step stays in the code behind a flag set to OFF, with the reason logged
 | file | what |
 |---|---|
 | `backend/vehicle_dr.py` | THE new filter: 6-state [E, N, psi, v, b_g, b_a] EKF; `run_pipeline(s_df, None, outage_window, params, t_end)`; `VDRParams`; `bearing_to_psi`; `evaluate_launch`; `calibrate_fixed_mount` |
-| `backend/check_outage.py` | scoring: `python backend/check_outage.py [drive] [--filter esekf or vehicle_dr] [--fixes-only] [--mini-only] [--windows auto/tuning/all/off] [--per-window] [--unseal]` — 200-260 s outage report, **E0 along/cross + speed + path-ratio block**, mini-outage section (hold / const-v baselines) and, for vehicle_dr on S3b, the **sliding 60 s tuning windows** (`window_benchmark`, `score_track`, `Truth`, `summarize_windows` are importable for tuning scripts). Reserved drives S3c/S3a/S2/S4 need `--unseal`. |
+| `backend/check_outage.py` | scoring: `python backend/check_outage.py [drive] [--filter esekf or vehicle_dr] [--fixes-only] [--mini-only] [--windows auto/tuning/all/off] [--per-window] [--unseal]` — 200-260 s outage report, **E0 along/cross + speed + path-ratio block**, mini-outage section (hold / const-v baselines) and, for vehicle_dr on S3b, the **sliding 60 s tuning windows** (`window_benchmark`, `score_track`, `Truth`, `summarize_windows` are importable for tuning scripts). Reserved drives S3c/S3a/S4 need `--unseal` (S2 is a development drive since registry v2). |
 | `backend/window_plan.py` | deterministic sliding-window plan (phone fix availability + file time span only; the pre-registered rule); `python backend/window_plan.py S3c` reproduces the registered list (sha1 96375f11...) |
 | `backend/tests/test_eval_e0.py` | 32 tests: window-plan rule, along/cross (line, circle, stopped truth), path ratio, speed diagnostics, guard, sandbox windows (GNSS really hidden, truncation exact, baselines, vehicle_dr beats hold), launch-from-stop flag, dev_eval helpers |
 | `backend/dev_eval.py` | **development-window harness (registry v2)**: scores a `VDRParams` on the S3b dev windows (11) + S2 dev windows (861, worker pool, below-normal priority) + S3b mini / event / coverage / launch-from-stop; hold and const-v on the same windows. `python backend/dev_eval.py --name X --set key=value` or several `--config "NAME\|key=value\|..."` in one pool; `--workers 4` (each worker holds S2, ~300 MB — the machine is shared, 30 workers ran out of memory), `--s2-stride 4` for screening runs |
@@ -56,15 +60,16 @@ New result keys: `gyro_scale_k / _log / _pairs` (H1a), `gyro_state_log` (H1b), `
 |---|---|
 | process noise | sigma_gyro 0.010 rad/s, turn_noise 0.50, rw_v 2.00 m/s/sqrt(s), rw_bg 1e-4, rw_ba 1e-3, rw_pos 0.10, rw_v_aided 1.0 |
 | GNSS | gnss_min_sigma 3.0 m, sigma_gnss_speed 0.3 m/s, sigma_gnss_course_deg 6.0, min_course_speed 3.0 m/s, min_satellites 6, gate_enabled True, max_consecutive_pos_rejects 3 |
-| standstill | win 10 samples, acc_var_enter 0.10 / exit 0.30, w_enter 0.05 / exit 0.10 rad/s, v_gate 2.0 m/s, launch_sigma_v 1.5, gnss_moving_speed 2.0, sigma_zupt 0.05, sigma_zaru 0.01 |
+| standstill | win 10 samples, acc_var_enter 0.10 / exit 0.30, w_enter 0.05 / exit 0.10 rad/s, v_gate 2.0 m/s, launch_sigma_v 1.5, gnss_moving_speed 2.0, sigma_zupt 0.05, **sigma_zaru 0.10 (H1c; was 0.01)** |
 | launch (ON) | use_launch True, n_before 8, n_after 20, min_rest 10, R_min 0.8, min_accel 0.4 m/s^2, turn_comp True, w_max_comp 0.8, comp_max 1.0, release_mean_thr 0.6 (x3 samples), quiet_enter_n 30, sigma_v_after 0.6, sigma_ba 0.2, aided_w_max 0.10, aided_max_s 0.0 |
 | centripetal (OFF) | use_centripetal False, cent_w_min 0.15, cent_steady 0.10, cent_every 5, cent_v_min 1.0, sigma_cent 1.0 (untuned default; best S3b grid point was 4.0 = nearly off), cent_res 0.6, cent_bg_coupling False |
 | fixed mount (OFF) | use_fixed_mount False, mount_cal_t 200 s, gate: both criteria corr > 0.8 and within 30 deg, sigma_lat 0.8, sigma_ba_rest 0.15 |
 | initial P (std) | pos 5 m, psi pi, v 5 m/s, b_g 0.02, b_a 0.3; psi_init_sigma 6 deg |
 
-Sanity check that the state is as documented: `PYTHONUTF8=1 python backend/check_outage.py S3b --filter vehicle_dr` must give mini-outages 21.93 / 17.11 / 64.85 (n = 20, coverage 50 %), outage mean 64.35 m, end 145.89 m
-(reproduced 2026-09-26 before E0 and again after it), and the E0 reference: tuning windows (n = 11) mean error median / mean 80.97 / 84.11, end error median / p90 161.47 / 214.23, path ratio median 0.96;
-event along / cross at end -85.58 / +118.15 m, path ratio 0.46. Runtime: one full vehicle_dr run of S3b = 0.10 s measured (15 us/row); all 345 S3c windows would take roughly 2 min (estimate, not measured).
+Sanity check that the state is as documented (CURRENT DEFAULT, after H1c): `PYTHONUTF8=1 python backend/check_outage.py S3b --filter vehicle_dr` must give mini-outages **21.72 / 16.33 / 63.92** (n = 20, coverage 55 %), outage mean **68.60 m**, end **158.96 m**,
+event along / cross at the end -100.34 / +123.29 m, path ratio 0.46, mean speed error 2.65 m/s. (Old default, sigma_zaru = 0.01: 21.93 / 17.11 / 64.85, coverage 50 %, outage 64.35 / 145.89, along / cross -85.58 / +118.15 — reproduced 2026-09-26 before E0, after E0 and after the H1 code changes with the flags off;
+`python backend/dev_eval.py --set sigma_zaru=0.01` reproduces the old dev-window baseline.) Dev-window reference for the current default: `python backend/dev_eval.py --workers 4` -> S3b 126.0 / 211.6 / 103.4 / 73.1, S2 (861) 130.6 / 377.1 / 53.8 / 86.1, pooled 130.6, ~5 min.
+Runtime: one full vehicle_dr run of S3b = 0.10 s (15 us/row); a full S2 window evaluation = ~5 min with 4 low-priority workers (~90 s for the stride-4 screening subset).
 
 ## Latest results table (S3b unless stated; mini = mean / median / max in m over the 20 intervals ending <= 200 s)
 | step | S3b mini | LOO mean | S3b outage mean / end | disp (154) | path (~225) | 1-sigma coverage (~39 %) | S1 mini mean | verdict |
@@ -76,7 +81,8 @@ event along / cross at end -85.58 / +118.15 m, path ratio 0.46. Runtime: one ful
 | B3a vehicle_dr core | 22.46 / 17.32 / 65.23 | 22.92 | 59.54 / 153.78 | 0.1 | 0.2 | 50 % | n/a | pass |
 | B3b as specified (strict omega < 0.05) | 22.46 / 17.32 / 65.23 | – | – | – | – | – | n/a | fail: no S3b launch accepted |
 | B3b turn-comp + accel integrated to next stop | 33.89 / 26.69 / 100.45 | – | – | – | – | 40 % | n/a | worse, reverted |
-| **B3b replay only (CURRENT DEFAULT)** | **21.93 / 17.11 / 64.85** | 22.12 | 64.35 / 145.89 | 75.5 | 104.9 | 50 % | n/a | pass, marginal (-0.53 m; 2 launches in the tuning window) |
+| B3b replay only (old default until H1c) | 21.93 / 17.11 / 64.85 | 22.12 | 64.35 / 145.89 | 75.5 | 104.9 | 50 % | 43.89 | pass, marginal (-0.53 m; 2 launches in the tuning window) |
+| **H1c sigma_zaru 0.10 (CURRENT DEFAULT)** | **21.72 / 16.33 / 63.92** | – | 68.60 / 158.96 | 69.9 | 104.5 | 55 % | **16.77** (tail gone) | adopted: dev windows -22 % (S3b) / -14 % (S2); event +6.6 % / +9 % (report only) |
 | B3c centripetal speed (best S3b grid point) | 22.12 / 17.64 / 62.28 | 23.75 | 72.22 / 163.16 | 115.9 | 159.5 | 45 % | n/a | fail, OFF |
 | B3d fixed-mount aiding (S3b gate inactive; S1 active, phi -65.5 deg) | = B3b | 22.12 | 64.35 / 145.89 | 75.5 | 104.9 | 50 % | off 43.89 / on 52.66 | no benefit, OFF |
 
@@ -85,7 +91,31 @@ S1 (validation, nothing tuned on it), 523 intervals outside 200-260 s: B3d off 4
 Current default outage (S3b, reported not tuned): mean 64.35, end 145.89, max 145.89, path 104.9 m (truth 225.7), displacement 75.5 m (truth 154.0), |dyaw| 288 deg (truth 676),
 truth inside 1-sigma 20.3 %, sigma at 260 s = 268 m, gap last fix -> AERIS at 200 s = 4.26 m, pre-outage (20-200 s) mean 10.76 m vs raw phone GNSS 7.08 m.
 
-## Plan results table (E0 → I3; S3b only; append a row per step; show this table to the user after I3)
+## PLAN RESULTS TABLE v2 (registry v2 metrics; append a row per step; show it to the user after H1 and again after I3)
+Dev windows: S3b = the 11 sliding 60 s outages starting 30-130 s (end < 200 s); S2 = the 861 pre-registered windows (rows marked "screen" use the stride-4 subset, n = 216, and are compared with the old default on the same subset: 150.0 / 466.9 / 67.5 / 95.2).
+Cells = median end / p90 end / median |cross| at end / median |along| at end (m). Launch-from-stop = dev windows (S3b + S2, n = 138) starting within 10 s after an IMU standstill: median end. Event = 200-260 s (report only). 1σ = mini / S3b windows / S2 windows.
+Noise rule: windows overlap; < 5 % on the median end error = no change; keep a change only if it helps S3b AND S2 (or helps one and is neutral on the other).
+| step | S3b dev windows | S2 dev windows | S3b mini mean | launch-from-stop med end (n) | event mean / end / path ratio | 1σ coverage | verdict |
+|---|---|---|---|---|---|---|---|
+| hold-last-fix | 156.5 / 299.6 / 142.0 / 64.2 | 368.6 / 869.4 / 132.6 / 261.6 | 52.95 | 264.7 (138) | – | – | reference |
+| const-v | 430.7 / 668.0 / 162.8 / 366.1 | 385.5 / 758.7 / 183.6 / 241.6 | 34.89 | 251.7 (138) | – | – | reference |
+| E0 reference (old default, sigma_zaru 0.01) | 161.5 / 214.2 / 121.9 / 76.5 | 152.3 / 490.9 / 66.9 / 98.0 | 21.93 | 151.2 (138) | 64.35 / 145.89 / 0.46 | 50 / 53 / 41 % | old reference |
+| H1a gyro-scale regression (spec W 300, min 5) | identical | 155.8 / 492.2 / 67.6 / 100.7 | 21.92 | 152.4 (138) | 63.44 / 143.53 / 0.46 | 50 / 53 / 37 % | no benefit (real scale ~1.0): OFF, kept |
+| H1a (W = all) | identical | 156.2 / 480.8 / 65.9 / 99.6 | 21.92 | 152.1 (138) | 63.44 / 143.53 / 0.46 | 50 / 53 / 39 % | no benefit: OFF |
+| H1a (W 300, deadband 0.05) | identical | 155.8 / 477.0 / 67.2 / 97.4 | 21.93 | 153.0 (138) | 64.35 / 145.89 / 0.46 | 50 / 53 / 38 % | no benefit: OFF |
+| H1b scale state s_g (screen) | 162.3 / 213.4 / 128.1 / 77.1 | 149.0 / 449.1 / 65.7 / 95.4 | 21.95 | 193.6 (37) | 64.98 / 147.43 / 0.47 | 55 / 53 / 42 % | no change: OFF, kept |
+| turn_noise 0.3 / 0.15 / 0.05 (screen) | 164.3 / 166.4 / 154.4 (end) | 148.6 / 150.4 / 151.9 (end) | 22.23 / 22.79 / 23.22 | 182.9 / 182.6 / 182.5 (37) | 65.72 / 67.97 / 67.71 (mean) | S2 29 / 24 / 24 % | no change; coverage collapses: keep 0.5 |
+| probe: b_g frozen at 0 (screen) | 126.3 / 208.8 / 94.9 / 73.1 | 183.5 / 444.6 / 92.3 / 100.1 | 21.48 | 206.1 (36) | 67.78 / 156.77 / 0.46 | 55 / 55 / 23 % | helps S3b, hurts S2 +22 %: rejected |
+| probe: tight prior + rw_bg 1e-5 (screen) | 126.2 / 208.8 / 95.6 / 73.0 | 122.4 / 385.5 / 58.5 / 77.2 | 21.49 | 187.2 (36) | 67.62 / 156.30 / 0.46 | 55 / 55 / 56 % | helps both; superseded by H1c |
+| **H1c sigma_zaru 0.10 (FULL S2 list) — CURRENT DEFAULT** | **126.0 / 211.6 / 103.4 / 73.1** | **130.6 / 377.1 / 53.8 / 86.1** | **21.72** | **147.9 (138)** | 68.60 / 158.96 / 0.46 | 55 / 50 / 62 % | **adopted** (S3b -22 %, S2 -14 %; S1 tail gone) |
+| I1a GNSS latency | | | | | | | pending |
+| I1b robustness (course failsafe / reset / Huber) | | | | | | | pending |
+| I2a OU speed prior | | | | | | | pending |
+| I2b turn speed ceiling | | | | | | | pending |
+| I3 vibration speed (alone, and with I2a) | | | | | | | pending |
+| best combination | | | | | | | pending |
+The target is to beat hold's end error clearly: S3b now 126.0 vs 156.5 m (-19 %; p90 211.6 vs 299.6, -29 %), S2 130.6 vs 368.6 m (-65 %).
+Old E0-format table (S3b only, superseded — kept for history):
 Tuning windows = the 11 S3b 60 s outages starting 30-130 s (end < 200 s). Along / cross = MEDIAN over windows of |along| / |cross| at the end of the window (m). Event = the 200-260 s outage (reported, never tuned).
 Coverage = truth inside the reported 1-sigma ellipse: mini-outage intervals / windows (median over windows of the per-epoch fraction).
 
@@ -108,8 +138,10 @@ mean speed error 4.71 / 4.61 / 5.86 m/s; path ratio 0.96 / 1.08 / 1.48; 1-sigma 
 0. **(E0) The 60 s windows and the event measure different regimes; vehicle_dr's 60 s outage error is large.** On the tuning windows vehicle_dr beats const-v and hold on MEAN error (median 81 vs 243 / 143 m) but its END error is
    no better than doing nothing (median 161 vs hold 156 m); it is cross-track dominated (|cross| 122 m vs |along| 77 m at the end): heading/turn shape, not only speed. The mean speed error is 4.7 m/s (speed is held while real driving is
    stop-and-go). The tuning windows have path ratio ~1 (speed held from a moving state is right on average), the event has 0.46 (car starts from a stop inside the outage) — so I2 tuned on these windows need not fix the event;
-   the event stays report-only. 11 windows overlap heavily (~2.7 independent 60 s stretches): a thin tuning signal.
-1. **S1 heavy error tail from a hard-gate lock-out (highest priority).** vehicle_dr's S1 median 20.05 m beats const-v (22.78) but the mean 43.89 does not (26.67): 11.1 % of intervals > 100 m (const-v 0.8 %), 4 % > 200 m,
+   the event stays report-only. 11 windows overlap heavily (~2.7 independent 60 s stretches): a thin tuning signal. **Update (H1/H1c): the cross-track error was heading DRIFT from a contaminated gyro bias, not the gyro scale (scale = 1.0); after H1c S3b end error is 126 m (hold 156 m) and
+   S2 131 m (hold 369 m). The remaining S3b error is still cross-heavy (|cross| 103 vs |along| 73 m).**
+1. **RESOLVED by H1c (2026-09-26): S1 heavy error tail from a hard-gate lock-out.** With sigma_zaru 0.10 the S1 mini-outage mean is 16.77 m (const-v 26.67), max 96 m, 0.0 % of intervals > 100 m, and the gate rejections fall 107 / 94 / 29 -> 0 / 1 / 0 (course / position / forced): the
+   cause was ZARU-contaminated heading, not the gate itself. The gate has still no course failsafe (I1b as a safety net). Original description: vehicle_dr's S1 median 20.05 m beats const-v (22.78) but the mean 43.89 does not (26.67): 11.1 % of intervals > 100 m (const-v 0.8 %), 4 % > 200 m,
    max 620 m; mean without the worst 5 % is 31.0 m. In 9 of the 10 worst intervals BOTH the course and the position update were rejected by the 99 % gate at the interval-start fix; whole drive: 107 course rejections,
    94 position rejections, 29 forced position accepts, 1 speed rejection (S3b: 1 / 1 / 0 / 0). Once psi is wrong the gate rejects exactly the measurements that would repair it; only position has a failsafe and a forced
    position accept does not repair psi. NOT fixed on purpose (found on S1 = validation): candidate B3i (Huber / Student-t GNSS updates) or a course failsafe, to be justified and verified on the sandbox and S3b.
@@ -908,3 +940,82 @@ The A2 "scale" was an aliasing artefact; the gyro scale of this phone is 1.00 +/
 | W 300, min 3, deadband 0.05 | identical | 156.6 / 477.0 / 67.7 / 99.7 | 21.93 | 64.35 / 145.89 / 0.46 |
 On S3b no pair set is large enough before 130 s to change k, so the dev windows are bit-identical; on S2 every variant moves the median end by +2 to +3 % (inside the 5 % noise band, not better). By the standing rule H1a is switched OFF and kept.
 H1b (S2 stride-4 screening subset, n = 216, baseline on the same subset 150.0 / 466.9 / 67.5 / 95.2): S3b 162.3 / 213.4 / 128.1 / 77.1, S2 149.0 / 449.1 / 65.7 / 95.4 -> no change (+0.5 % / -0.7 %); OFF, kept.
+**turn_noise retune** (grid 0.5 / 0.3 / 0.15 / 0.05 on the plain filter; H1b = default on real data, so its three combined runs were skipped as redundant). Same S2 stride-4 subset; med end / p90 / med |cross| / med |along|:
+| turn_noise | S3b windows | S2 windows (n = 216) | S3b mini mean | event mean / end / ratio (report only) | 1σ mini / S3b-win / S2-win |
+|---|---|---|---|---|---|
+| 0.5 (default) | 161.5 / 214.2 / 121.9 / 76.5 | 150.0 / 466.9 / 67.5 / 95.2 | 21.93 | 64.35 / 145.89 / 0.46 | 50 % / 53 % / 42 % |
+| 0.3 | 164.3 / 214.1 / 122.6 / 75.8 | 148.6 / 468.5 / 64.3 / 97.4 | 22.23 | 65.72 / 148.25 / 0.47 | 50 % / 47 % / 29 % |
+| 0.15 | 166.4 / 213.9 / 124.6 / 74.7 | 150.4 / 477.3 / 63.7 / 90.1 | 22.79 | 67.97 / 152.74 / 0.47 | 40 % / 45 % / 24 % |
+| 0.05 | 154.4 / 212.8 / 120.9 / 75.2 | 151.9 / 472.0 / 63.8 / 90.6 | 23.22 | 67.71 / 122.82 / 0.51 | 40 % / 45 % / 24 % |
+All medians move by < 5 % except S3b at 0.05 (-4.4 %, borderline) with S2 +1.3 %: "no change" by the noise rule, while the reported 1-sigma coverage collapses (S2 42 -> 24 %). turn_noise is NOT compensating for a gyro scale error (there is none); it only sets how honest the heading uncertainty is. Kept at 0.5.
+
+## H1 diagnostics — where the cross-track error really comes from (S3b / S2 dev windows; VBOX-derived quantities used for SCORING/DIAGNOSIS only)
+**1. Heading error at the outage start is small; the cross-track error is heading DRIFT during the 60 s.** filter psi vs the direction of travel of the truth (S3b 11 windows / S2 108 windows = every 8th):
+| | S3b | S2 |
+|---|---|---|
+| abs heading error at outage start, median / p90 | 2.3 / 7.3 deg | 2.9 / 26.3 deg |
+| abs heading error at outage end, median / p90 | 24.7 / 147.8 deg | 12.7 / 87.3 deg |
+| drift over the 60 s, median / p90 | 25.0 / 140.5 deg | 11.1 / 66.7 deg |
+| median abs cross at end vs median abs(path * sin(start error)) | 121.9 vs 13.3 m | 64.2 vs 21.6 m |
+| windows with start error > 15 deg (their median end error vs the rest) | 9 % (231 vs 151 m) | 17 % (377 vs 139 m) |
+(LS slope of filter turning / truth turning over the window: 0.84 / 0.74 — biased low by noise in the position-derived truth heading, so not evidence of a scale error; the independent scale estimates above are 1.0.)
+**2. The filter's gyro bias b_g does not follow the truth-derived bias on S3b.** Truth-derived bias (median over moving samples of gyro - scale*VBOX yaw rate, 60 s blocks) vs filter b_g at the block centre, rad/s:
+0-60 s +0.0047 vs -0.0032; 60-120 -0.0113 vs -0.0025; 120-180 +0.0042 vs -0.0087; 180-240 +0.0024 vs -0.0009; 240-300 +0.0012 vs -0.0078; 300-360 +0.0014 vs -0.0084; 360-420 +0.0022 vs -0.0055; 420-480 +0.0034 vs -0.0070; 480-540 +0.0018 vs -0.0053; 540-600 +0.0017 vs -0.0034.
+The filter is 0.005-0.013 rad/s (17-45 deg/min) below the truth-derived bias in most blocks; the gyro at truth-stopped samples reads +0.0042 rad/s (VBOX yaw rate 0.000 there).
+**3. Mechanism: ZARU at false / partial standstills feeds real rotation into b_g.** 13 IMU-only standstill episodes on S3b (42 s in total); 29 % of the ZARU time is while VBOX speed > 0.5 m/s, and one episode (269.8-277.6 s) is flagged stationary while VBOX shows 7-8.9 m/s.
+b_g jumps inside the episodes that contain motion: 139-145 s (launch) -0.0021 -> -0.0088; 208.6-214.2 s (0.6 m/s) -0.0011 -> +0.0060; 262.5-265.2 s (0.7 m/s) +0.0054 -> -0.0075; 415.9-418.3 s (1.6 m/s) -0.0042 -> -0.0075; 604-610 s -0.0029 -> -0.0062.
+ZARU (sigma 0.01 rad/s at 10 Hz) converges to the raw gyro reading in a few seconds, and a launch or a slow turn is real rotation, not bias.
+**4. Oracle / causal probes on the S3b dev windows** (med end / p90 / med |cross| / med |along|; oracle values use a constant chosen from VBOX-stopped samples — a diagnostic, NOT an AERIS input):
+| b_g handling | med end | p90 | med cross | med along | mini mean | event mean / end |
+|---|---|---|---|---|---|---|
+| default (adaptive, p0_bg 0.02, rw_bg 1e-4) | 161.5 | 214.2 | 121.9 | 76.5 | 21.93 | 64.35 / 145.89 |
+| ORACLE b_g fixed +0.0042 | 127.9 | 207.1 | 90.5 | 77.9 | – | – |
+| ORACLE b_g fixed +0.0020 | 127.0 | 207.9 | 92.8 | 75.3 | – | – |
+| b_g fixed 0 (no bias at all) | 126.3 | 208.8 | 94.9 | 73.1 | 21.48 | 67.78 / 156.77 |
+| b_g fixed -0.005 (where the filter drifts to) | 125.0 | 211.6 | 100.5 | 69.2 | – | – |
+| causal, parameters only: rw_bg 1e-5 / 1e-6 / 0 with the default p0_bg | 160.7 | 214.3 | 122.2 | 76.6 | 21.90 | 66.6 / 153.0 |
+| causal: p0_bg 1e-5 (start at 0), rw_bg 1e-4 | 147.3 | 209.5 | 119.8 | 77.9 | 21.66 | 63.90 / 144.70 |
+| causal: p0_bg 1e-5, rw_bg 1e-5 | 126.2 | 208.8 | 95.6 | 73.0 | 21.49 | 67.62 / 156.30 |
+| causal: p0_bg 1e-5, rw_bg 0 (b_g frozen at 0) | 126.3 | 208.8 | 94.9 | 73.1 | 21.48 | 67.78 / 156.77 |
+| causal: p0_bg 0.005, rw_bg 0 | 160.5 | 214.3 | 124.5 | 74.3 | 21.82 | 66.58 / 153.02 |
+| causal: sigma_zaru 0.05 (weaker standstill updates) | 135.9 | 212.0 | 110.8 | 76.2 | 21.74 | 67.63 / 156.19 |
+Reading: on S3b, holding b_g near 0 (any constant between -0.005 and +0.004) removes ~22 % of the median end error and ~22-25 % of the cross-track error (p90 unchanged, the event 5-7 % worse); which constant hardly matters. What hurts is an ADAPTIVE b_g with a large prior:
+even rw_bg = 0 keeps the (wrong) value learned early, and only a tight prior (p0_bg <= ~1e-5) helps.
+**5. The drives have different biases, so the bias must be learned, just not from contaminated updates.** VBOX-yaw-rate regression (moving samples): S3b scale 1.013-1.019, bias +0.004 rad/s (truth-stopped gyro mean +0.0042); **S2 scale 0.979, bias -0.0067 rad/s** (truth-stopped mean -0.0061, 600 s block medians -0.003..-0.011).
+The default filter's b_g on S2 wanders (step-to-step sigma 0.0022, from -0.0008 to -0.0166); with p0_bg 1e-5 / rw_bg 1e-5 it moves smoothly from 0 to the right value (-0.0001 at 300 s -> -0.008 by ~55 min, jump sigma 0.0002); frozen at 0 leaves -0.0065 uncorrected.
+
+# H1c — standstill bias update (ZARU) weight: sigma_zaru 0.01 -> 0.10 (ADOPTED as the new default; found by the H1 diagnostics, tuned on the development windows S3b + S2)
+Not in the plan: it follows from H1 diagnostics 3-5. The only code change is the default of an existing parameter, `VDRParams.sigma_zaru` (rad/s), 0.01 -> 0.10; revert = set it back to 0.01.
+**Screening grid** (S3b windows n = 11; S2 stride-4 subset n = 216; med end / p90 / med |cross| / med |along|, m; baseline = old default on the same subset):
+| sigma_zaru | S3b windows | S2 windows (n = 216) | S3b mini mean | event mean / end (report only) | 1σ mini / S3b-win / S2-win |
+|---|---|---|---|---|---|
+| 0.01 (old default) | 161.5 / 214.2 / 121.9 / 76.5 | 150.0 / 466.9 / 67.5 / 95.2 | 21.93 | 64.35 / 145.89 | 50 / 53 / 42 % |
+| 0.02 | 159.0 / 213.2 / 120.5 / 76.5 | 127.0 / 374.9 / 53.4 / 75.4 | 21.84 | 65.95 / 151.10 | 55 / 52 / 57 % |
+| 0.03 | 149.1 / 212.6 / 120.4 / 76.4 | 115.7 / 375.6 / 49.2 / 76.2 | 21.79 | 66.68 / 153.36 | 55 / 51 / 62 % |
+| 0.05 | 135.9 / 212.0 / 110.8 / 76.2 | 113.7 / 375.2 / 49.7 / 74.9 | 21.74 | 67.63 / 156.19 | 55 / 50 / 59 % |
+| **0.1 (chosen)** | 126.0 / 211.6 / 103.4 / 73.1 | 113.8 / 377.4 / 51.9 / 75.6 | 21.72 | 68.60 / 158.96 | 55 / 50 / 60 % |
+| 0.2 | 125.3 / 211.5 / 101.0 / 70.0 | 113.8 / 380.3 / 52.1 / 76.0 | 21.71 | 68.99 / 160.07 | 55 / 50 / 60 % |
+| 0.5 | 125.3 / 211.4 / 100.2 / 69.1 | 113.8 / 381.2 / 52.1 / 76.1 | 21.71 | 69.12 / 160.43 | 50 / 50 / 60 % |
+The response saturates for sigma_zaru >= 0.1 (a smooth plateau, not a fragile optimum). Selection rule fixed after seeing the plateau: the smallest value within 5 % of the plateau on both drives = 0.1 (0.05 is still 8 % short on S3b). Other probes on the same subset (S3b / S2 med end): b_g frozen at 0
+(p0_bg 1e-5, rw_bg 0) 126.3 / 183.5 (helps S3b, HURTS S2 by 22 %: rejected); tight prior + rw_bg 1e-5 126.2 / 122.4 (helps both; superseded because it assumes a near-zero bias and learns slowly); p0_bg 1e-5 + default rw_bg 147.3 / 150.0.
+**Confirmation on the FULL pre-registered S2 list (n = 861)** — the stride-4 subset was optimistic for S2 (-24 %), the full list gives -14 %; this is the number to use:
+| | S3b dev windows | S2 dev windows (n = 861) | pooled med end | S3b mini mean | launch-from-stop med end (n = 138) | event mean / end / ratio (report only) | 1σ mini / S3b-win / S2-win |
+|---|---|---|---|---|---|---|---|
+| old default (sigma_zaru 0.01) | 161.5 / 214.2 / 121.9 / 76.5 | 152.3 / 490.9 / 66.9 / 98.0 | 153.1 | 21.93 | 151.2 | 64.35 / 145.89 / 0.46 | 50 / 53 / 41 % |
+| **sigma_zaru 0.1 (NEW DEFAULT)** | **126.0 / 211.6 / 103.4 / 73.1** | **130.6 / 377.1 / 53.8 / 86.1** | 130.6 | 21.72 | 147.9 | 68.60 / 158.96 / 0.46 | 55 / 50 / 62 % |
+| change | -22 % / -1 % / -15 % / -4 % | -14 % / -23 % / -20 % / -12 % | -15 % | -1 % | -2 % (noise) | +6.6 % / +9 % (worse, report only) | |
+hold-last-fix on the same windows: S3b 156.5 / 299.6, S2 368.6 / 869.4 -> vehicle_dr now beats hold's end error by 19 % (median) and 29 % (p90) on S3b, and by 65 % / 57 % on S2.
+**S1 (secondary; previously inspected, NOTHING tuned on it) — the heavy tail of known issue #1 disappears.** 523 mini-outage intervals outside 200-260 s:
+| S1 | mean / median / p90 / max (m) | intervals > 100 m | inside 1σ | course rej. / position rej. / forced pos. accepts |
+|---|---|---|---|---|
+| sigma_zaru 0.01 (old) | 43.89 / 20.05 / 108.0 / 620.0 | 11.1 % | 30 % | 107 / 94 / 29 |
+| **sigma_zaru 0.1** | **16.77 / 13.37 / 34.0 / 96.3** | **0.0 %** | 53 % | **0 / 1 / 0** |
+| const-v | 26.67 / 22.78 / – / 136.2 | 0.8 % | – | – |
+Gate rejections on the other drives (course / position / forced): S3b 18/60, 12/68, 4 -> 7/60, 4/68, 1 (whole drive incl. post-outage fixes); S2 91/824, 77/940, 19 -> 12/824, 18/940, 4. **Mechanism confirmed:** ZARU at false / partial standstills dragged b_g onto real rotation, the heading went wrong,
+and the 99 % hard gate then rejected exactly the GNSS updates that would have repaired it (the "lock-out"). With a weaker ZARU the lock-out does not occur. Known issue #1 (S1 tail) is resolved by this change; the gate itself (I1b) is untouched.
+**Sandbox criteria (fixed before the tests were run; `tests/test_gyro_scale.py::TestZaruWeight`):** (1) mechanism, in a CONVERGED filter (b_g std 1e-3): a 3 s false standstill at a real 0.05 rad/s moves b_g by 0.0115 rad/s under the old weight and 0.00015 under the new (77x less; criterion: >= 10x less);
+(2) a long true standstill still teaches the bias from the initial prior (60 s at -0.006 -> within 0.0015); (3) sandbox long_route, 4 seeds, biases -0.008 and +0.020 rad/s: sigma_zaru 0.03-0.2 changes the median window end error by <= +0.1 % (criterion 3 %). Disclosure: my first version of criterion (1) used an
+absolute 0.02 rad/s bound measured from the initial-prior state, where the prior std 0.02 dominates (a 3 s burst legitimately moves b_g by 0.027 even at the new weight); I replaced it with the relative converged-filter criterion above before adopting the change.
+**Caveats.** (a) The 200-260 s event (a single window that starts in a stop; report only) gets worse: mean 64.35 -> 68.60 m, end 145.89 -> 158.96 m, along/cross at the end -85.6 / +118.2 -> -100.3 / +123.3 m; the dev windows and S1 improve, so this is a documented cost, not a tuned quantity.
+(b) The launch-from-stop windows barely move (147.9 vs 151.2, -2 %): that regime is a speed problem (I2a), not this one. (c) sigma_zaru 0.1 is on a plateau, so ZARU is now nearly a formality; a better design would learn b_g only from CONFIRMED standstills (never while a launch is pending, VBOX-free criterion) — an optional follow-up, not needed for the result above.
+(d) The older note "S3b: 1 / 1 / 0 / 0" next to the S1 gate counts (known issue #1) does not match a whole-drive S3b run (18 course / 12 position / 1 speed rejections, 4 forced accepts under the old default, with the 200-260 s outage and the post-outage fixes included); I did not find which span it referred to. The S1 counts (107 / 94 / 1 / 29) reproduce exactly.

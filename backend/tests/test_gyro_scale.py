@@ -127,6 +127,46 @@ class TestEstimatorOnTheSandbox(unittest.TestCase):
         self.assertLess(abs(np.median(P[:, 2] / P[:, 1]) - 1.0 / 1.3), 0.06)   # y / x ~ 1 / scale
 
 
+class TestZaruWeight(unittest.TestCase):
+    """H1c: the standstill bias update (ZARU) must not let a false / partial standstill drag the gyro bias onto real rotation.
+    Pass criteria: (1) mechanism — in a CONVERGED filter (b_g std 1e-3 rad/s) 3 s of a real 0.05 rad/s rotation mistaken for a standstill moves
+    b_g at least 10x less under the default weight than under the old 0.01 (the first version of this test used an absolute 0.02 rad/s bound
+    from the initial-prior state, which was wrong: the prior std 0.02 dominates there); (2) a long true standstill still teaches the bias
+    from the initial prior; (3) sandbox — the weaker update is no worse than the old weight by more than 3 %."""
+
+    @staticmethod
+    def _false_standstill_shift(sigma_zaru, b_std=1.0e-3):
+        p = replace(VDRParams(), sigma_zaru=sigma_zaru)
+        e = vehicle_dr._EKF(p, 0.0)
+        e.P[4, 4] = b_std ** 2                                       # converged bias estimate
+        H = np.zeros((1, e.nx)); H[0, 4] = 1.0
+        for _ in range(30):                                          # 3 s at 10 Hz, real rate 0.05 rad/s, b_g = 0 before
+            e.update(np.array([0.05 - e.x[4]]), H, np.array([[p.sigma_zaru ** 2]]), 1, "zaru", 0.0, gated=False)
+        return float(e.x[4])
+
+    def test_default_weight_is_the_weaker_one(self):
+        self.assertGreaterEqual(VDRParams().sigma_zaru, 0.1)
+
+    def test_false_standstill_moves_the_bias_far_less_than_the_old_weight(self):
+        old, new = self._false_standstill_shift(0.01), self._false_standstill_shift(VDRParams().sigma_zaru)
+        self.assertGreater(old, 0.01)                                # the old weight really was dragged onto the real rotation
+        self.assertLess(new, 0.1 * old)
+
+    def test_a_real_long_standstill_still_teaches_the_bias(self):
+        p = VDRParams()
+        e = vehicle_dr._EKF(p, 0.0)
+        H = np.zeros((1, e.nx)); H[0, 4] = 1.0
+        for _ in range(600):                                         # 60 s at rest, gyro reads a true bias of -0.006 rad/s
+            e.update(np.array([-0.006 - e.x[4]]), H, np.array([[p.sigma_zaru ** 2]]), 1, "zaru", 0.0, gated=False)
+        self.assertAlmostEqual(e.x[4], -0.006, delta=0.0015)
+
+    def test_sandbox_no_worse_than_the_old_weight(self):
+        for sd in (0, 1):
+            s, tr = simulate(SimConfig(seed=sd, route=long_route()))
+            new, old = _median_end(s, tr, VDRParams()), _median_end(s, tr, replace(VDRParams(), sigma_zaru=0.01))
+            self.assertLessEqual(new, 1.03 * old, (sd, new, old))
+
+
 H1B = replace(VDRParams(), use_gyro_state=True)
 
 
