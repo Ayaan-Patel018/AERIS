@@ -30,6 +30,7 @@ Returns the same result dict as ins_ekf.run_pipeline (plus extras).
 """
 import os
 import sys
+from collections import deque
 from dataclasses import dataclass, replace
 from typing import Optional, Tuple
 import numpy as np
@@ -142,6 +143,39 @@ class VDRParams:
     use_gyro_state: bool = False
     p0_sg: float = 0.10              # prior std of s_g
     rw_sg: float = 1.0e-4            # 1/sqrt(s): tiny random walk of s_g
+    # S1a — braking evidence required for the quiet_enter_n override (mount-free, causal); see AERIS_FINDINGS.md S1.
+    # Precomputed once from the IMU only (never depends on the filter state): 1 s mean of ax/ay minus a causal 20 s
+    # running median of each (removes the accel bias) -> excess = its norm, counted only when not turning and > 0.3 m/s^2;
+    # dv_brake = the causal 15 s sum of the counted excess. The gate itself (use_brake_gate) also needs the max FILTER
+    # speed over the last 15 s, which is tracked online (a monotonic deque) since it depends on the evolving state.
+    use_brake_gate: bool = False
+    brake_w_max: float = 0.10        # rad/s: |1 s mean omega_vert| must stay below this (not a turn) for excess to count
+    brake_thresh: float = 0.30       # m/s^2: excess above this counts toward dv_brake
+    brake_median_s: float = 20.0     # s: causal running median window that removes the accel bias
+    brake_window_s: float = 15.0     # s: causal window for the dv_brake sum AND the "max filter speed" gate
+    brake_frac: float = 0.60         # dv_brake must reach this fraction of the max filter speed over brake_window_s
+    # S1b — self-calibrating rest level: acc_var / omega-std thresholds learned from GNSS-CONFIRMED standstills only
+    # (a new fix with speed < self_cal_confirm_speed while flagged). Until self_cal_min_confirm stops are confirmed,
+    # entry keeps using the fixed acc_var_enter / w_enter thresholds.
+    use_self_cal: bool = False
+    self_cal_k: float = 2.0                  # grid {1.5, 2, 3}: entry needs acc_var < k*learned AND w_std < k*learned
+    self_cal_confirm_speed: float = 0.3      # m/s
+    self_cal_min_confirm: int = 2
+    # S1c — anti-cascade: after a GNSS-contradicted standstill (a new fix > anticascade_speed during, or within
+    # anticascade_lookback_s after, a standstill), block the v_est < v_gate entry branch for anticascade_block_s,
+    # unless S1a's braking evidence (dv_brake) is present. Shares the trigger with S1d.
+    use_anticascade: bool = False
+    anticascade_block_s: float = 20.0
+    anticascade_speed: float = 2.0
+    anticascade_lookback_s: float = 2.0
+    # S1d — retroactive replay (causal): on the same GNSS-contradicted-standstill trigger as S1c, rewind to the
+    # standstill's entry (a ring buffer of the filter state at each entry, capped at replay_buffer_s) and re-run that
+    # span with standstill entry disabled, then adopt the corrected state. Only uses data already seen; the DISPLAYED
+    # PAST for that span changes (documented, not a causality violation). Naturally inactive inside an outage (the
+    # trigger needs a new fix). Simplification (disclosed): the replay redoes only the core predict + GNSS position /
+    # speed / course updates, never H1a's gyro-scale k, launch calibration, centripetal or fixed-mount aiding.
+    use_replay: bool = False
+    replay_buffer_s: float = 30.0
     # initial covariance (std devs)
     p0_pos: float = 5.0
     p0_psi: float = np.pi
@@ -163,6 +197,29 @@ def _causal_window_stats(x, w):
     mean = (cs[idx + 1] - cs[lo]) / cnt
     var = np.maximum((cs2[idx + 1] - cs2[lo]) / cnt - mean ** 2, 0.0)
     return mean, var
+
+
+def _causal_sum(x, w):
+    """Causal running sum of x over the last w samples ending at each index (fewer at the start)."""
+    n = len(x)
+    cs = np.concatenate([[0.0], np.cumsum(x)])
+    idx = np.arange(n)
+    lo = np.maximum(0, idx - w + 1)
+    return cs[idx + 1] - cs[lo]
+
+
+def _causal_median(x, w):
+    """Causal running median of x over the last w samples ending at each index (fewer at the start; S1b/S1a)."""
+    x = np.asarray(x, dtype=float)
+    n = len(x)
+    w = max(1, min(int(w), n)) if n else 1
+    out = np.empty(n)
+    for i in range(min(w - 1, n)):
+        out[i] = np.median(x[:i + 1])
+    if n >= w:
+        view = np.lib.stride_tricks.sliding_window_view(x, w)
+        out[w - 1:] = np.median(view, axis=1)
+    return out
 
 
 def fit_scale_through_origin(x, y, method="theilsen"):
@@ -335,6 +392,67 @@ class _EKF:
         self.psi_ready = True
 
 
+def _replay_span(i_entry, i_now, x0, P0, nx, p, ts, dts, wv, fixE, fixN, spd, brg, acc, sats, new_fix, outage_window):
+    """S1d: re-run rows [i_entry, i_now] from the snapshot (x0, P0) taken right after i_entry's own predict, with
+    standstill entry DISABLED throughout (never stationary: predict always uses the moving physics, no ZUPT/ZARU).
+    Disclosed simplification: redoes only the core predict + GNSS position/speed/course updates — never H1a's
+    gyro-scale k (uses k_gyro = 1.0), launch calibration, centripetal or fixed-mount aiding — since none of those can
+    have fired in a span that (by construction of the replay) was never stationary. Returns (x, P, rows) where rows
+    is [(i, E, N, psi, v, P_pos) ...] for every replayed row, to splice back into the run's output arrays."""
+    x, P = x0.copy(), P0.copy()
+    rows = []
+
+    def upd(y, H, R, dof, consec):
+        S = H @ P @ H.T + R
+        try:
+            Sinv = np.linalg.inv(S)
+        except np.linalg.LinAlgError:
+            return False, consec
+        d2 = float(y @ Sinv @ y)
+        gated = consec < p.max_consecutive_pos_rejects if dof == 2 else True
+        if p.gate_enabled and gated and d2 > CHI2_99[dof]:
+            return False, (consec + 1 if dof == 2 else consec)
+        K = P @ H.T @ Sinv
+        x[:] = x + K @ y
+        x[2] = wrap_pi(x[2])
+        I_KH = np.eye(nx) - K @ H
+        P[:] = I_KH @ P @ I_KH.T + K @ R @ K.T
+        return True, (0 if dof == 2 else consec)
+
+    consec_pos_rej = 0
+    for i2 in range(i_entry, i_now + 1):
+        if i2 > i_entry:
+            dt, omega = dts[i2], wv[i2]
+            w = omega - x[4]                                        # never stationary; H1a's k is not re-derived here
+            psi_m = x[2] + 0.5 * w * dt
+            c, s, v_ = np.cos(psi_m), np.sin(psi_m), x[3]
+            x[0] += v_ * c * dt; x[1] += v_ * s * dt
+            x[2] = wrap_pi(x[2] + w * dt)
+            F = np.eye(nx)
+            F[0, 2] = -v_ * s * dt; F[0, 3] = c * dt
+            F[1, 2] = v_ * c * dt;  F[1, 3] = s * dt
+            F[0, 4] = v_ * s * dt * dt / 2.0; F[1, 4] = -v_ * c * dt * dt / 2.0; F[2, 4] = -dt
+            q = [p.rw_pos ** 2 * dt, p.rw_pos ** 2 * dt, (p.sigma_gyro * dt) ** 2 + (p.turn_noise * abs(w) * dt) ** 2,
+                p.rw_v ** 2 * dt, p.rw_bg ** 2 * dt, p.rw_ba ** 2 * dt] + ([p.rw_sg ** 2 * dt] if nx == 7 else [])
+            P[:] = F @ P @ F.T + np.diag(q)
+        t2 = ts[i2]
+        in_out = outage_window is not None and outage_window[0] <= t2 <= outage_window[1]
+        if new_fix[i2] and not in_out and not (np.isfinite(sats[i2]) and sats[i2] < p.min_satellites):
+            if np.isfinite(spd[i2]):
+                H1 = np.zeros((1, nx)); H1[0, 3] = 1.0
+                upd(np.array([spd[i2] - x[3]]), H1, np.array([[p.sigma_gnss_speed ** 2]]), 1, consec_pos_rej)
+            if np.isfinite(spd[i2]) and spd[i2] > p.min_course_speed and np.isfinite(brg[i2]):
+                H1 = np.zeros((1, nx)); H1[0, 2] = 1.0
+                upd(np.array([float(wrap_pi(float(bearing_to_psi(brg[i2])) - x[2]))]), H1,
+                    np.array([[np.radians(p.sigma_gnss_course_deg) ** 2]]), 1, consec_pos_rej)
+            sig = max(acc[i2], p.gnss_min_sigma) if np.isfinite(acc[i2]) else 10.0
+            H = np.zeros((2, nx)); H[0, 0] = 1.0; H[1, 1] = 1.0
+            y = np.array([fixE[i2] - x[0], fixN[i2] - x[1]])
+            _, consec_pos_rej = upd(y, H, np.eye(2) * sig ** 2, 2, consec_pos_rej)
+        rows.append((i2, float(x[0]), float(x[1]), float(x[2]), float(x[3]), P[0:2, 0:2].copy()))
+    return x, P, rows
+
+
 def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] = None,
                  params: Optional[VDRParams] = None, t_end: Optional[float] = None) -> dict:
     """
@@ -374,7 +492,8 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
     ax = np.where(np.isfinite(ax) & (np.abs(ax) < 15.0), ax, 0.0)
     ay = np.where(np.isfinite(ay) & (np.abs(ay) < 15.0), ay, 0.0)
 
-    w_mean, _ = _causal_window_stats(wv, p.win)
+    w_mean, w_var = _causal_window_stats(wv, p.win)
+    w_std = np.sqrt(w_var)                                     # S1b: 1 s std of the raw vertical rate (rest signature)
     _, vx = _causal_window_stats(ax, p.win)
     _, vy = _causal_window_stats(ay, p.win)
     acc_var = vx + vy
@@ -398,6 +517,23 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
     bg_out = []                                     # filter's gyro-bias estimate per row (diagnostics)
     dts = np.r_[0.1, np.diff(ts)]
     dts = np.where((dts > 0) & (dts <= 1.0), dts, 0.1)
+    # S1a — precomputed causal braking evidence (IMU only; never depends on the filter state). Also read by S1c
+    # (as the "unless braking evidence is present" exception) whenever either flag is on.
+    need_brake = p.use_brake_gate or p.use_anticascade
+    dv_brake = np.zeros(n)
+    if need_brake:
+        mean_ax, _ = _causal_window_stats(ax, p.win)
+        mean_ay, _ = _causal_window_stats(ay, p.win)
+        w_med = max(1, int(round(p.brake_median_s * 10.0)))
+        dev_ax = mean_ax - _causal_median(mean_ax, w_med)
+        dev_ay = mean_ay - _causal_median(mean_ay, w_med)
+        excess = np.sqrt(dev_ax ** 2 + dev_ay ** 2)
+        counted = np.where((np.abs(w_mean) < p.brake_w_max) & (excess > p.brake_thresh), excess, 0.0)
+        w_win_brake = max(1, int(round(p.brake_window_s * 10.0)))
+        dv_brake = _causal_sum(counted * dts, w_win_brake)
+    v15_dq = deque()                                 # S1a: monotonic deque, max FILTER speed over the last brake_window_s
+    block_vgate_until = -1e9                         # S1c: the v_est < v_gate branch is blocked until this time
+    replay_log = []                                  # S1d: one record per replay (diagnostics)
     launches = []
     aided, u_fwd = False, None                      # B3b: launch axis (phone frame) valid until the next standstill
     rest_sum, rest_cnt, stat_start = np.zeros(2), 0, None
@@ -410,6 +546,9 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
     psi_init_t = None
     zaru_count = 0
     ss_log, ss_open, ss_last_exit = [], None, -1e9   # S0 audit (diagnostics only, never read by the filter): one record per standstill episode
+    # S1b — self-calibrating rest level, learned only from GNSS-confirmed standstills
+    ss_acc_sum, ss_w_sum, ss_n_rows, ss_confirmed = 0.0, 0.0, 0, False
+    learn_acc_sum, learn_w_sum, learn_n = 0.0, 0.0, 0
     # H1a gyro-scale calibration state: cum[i] = integral of the UNCORRECTED (omega - b_g) up to row i (0 while stationary,
     # exactly like psi's propagation); pairs of consecutive usable new fixes -> (t_b, x, y); k = fitted slope, 1.0 = uncorrected
     k_gs = 1.0
@@ -445,10 +584,27 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         gs_cum[i] = gs_cum[i - 1] + (0.0 if stationary else (omega - ekf.x[4]) * dt)      # H1a: uncorrected gyro integral
         ekf.predict(dt, omega, stationary, a_f, k_gs)
 
-        # ── stationarity (IMU only) ──────────────────────────────────────────
+        # ── S1a: max FILTER speed over the last brake_window_s (a monotonic deque; O(1) amortized) ──
+        if need_brake:
+            vnow = float(ekf.x[3])
+            while v15_dq and v15_dq[-1][1] <= vnow:
+                v15_dq.pop()
+            v15_dq.append((i, vnow))
+            w_win_brake = max(1, int(round(p.brake_window_s * 10.0)))
+            while v15_dq[0][0] < i - w_win_brake + 1:
+                v15_dq.popleft()
+            brake_ok = dv_brake[i] >= p.brake_frac * v15_dq[0][1]
+        else:
+            brake_ok = False
+
+        # ── stationarity (IMU only) ────────────────────────────────────────────
         v_est = ekf.x[3]
         wm = abs(w_mean[i] - ekf.x[4])
-        quiet = acc_var[i] < p.acc_var_enter and wm < p.w_enter
+        if p.use_self_cal and learn_n >= p.self_cal_min_confirm:
+            # S1b: the rest signature learned from confirmed standstills replaces the fixed thresholds
+            quiet = acc_var[i] < p.self_cal_k * (learn_acc_sum / learn_n) and w_std[i] < p.self_cal_k * (learn_w_sum / learn_n)
+        else:
+            quiet = acc_var[i] < p.acc_var_enter and wm < p.w_enter
         quiet_run = quiet_run + 1 if quiet else 0
         mean_release = False
         if p.use_launch and stationary and rest_cnt >= p.launch_min_rest and i >= 5:
@@ -470,18 +626,25 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
                         pending = dict(i_rel=i, b_h=rest_sum / rest_cnt)
                     elif i - stat_start >= 15:
                         launches.append(dict(t_release=float(ts[i]), reason="no rest baseline", accepted=False))
-        elif i >= p.win and quiet and t >= block_until and (abs(v_est) < p.v_gate or (p.use_launch and quiet_run >= p.quiet_enter_n)):
-            stationary = True
-            ss_open = dict(t_enter=float(t), v_est=float(v_est), quiet_run=int(quiet_run), acc_var=float(acc_var[i]), w_dev=float(wm),
-                           via_v_gate=bool(abs(v_est) < p.v_gate),                       # branch A: the speed estimate is already low
-                           via_override=bool(p.use_launch and quiet_run >= p.quiet_enter_n),   # branch B: 3 s of sustained quiet
-                           gap_prev=float(t - ss_last_exit))                              # seconds since the previous episode ended
-            aided, u_fwd, pending = False, None, None                    # a launch axis never outlives a standstill
-            stat_start, rest_sum, rest_cnt = i, np.zeros(2), 0
+        else:
+            via_v_gate = abs(v_est) < p.v_gate and (not p.use_anticascade or t >= block_vgate_until or brake_ok)   # S1c
+            via_override = p.use_launch and quiet_run >= p.quiet_enter_n and (not p.use_brake_gate or brake_ok)     # S1a
+            if i >= p.win and quiet and t >= block_until and (via_v_gate or via_override):
+                stationary = True
+                ss_open = dict(t_enter=float(t), v_est=float(v_est), quiet_run=int(quiet_run), acc_var=float(acc_var[i]), w_dev=float(wm),
+                               via_v_gate=bool(via_v_gate), via_override=bool(via_override),   # the branch(es) that actually fired
+                               gap_prev=float(t - ss_last_exit))                              # seconds since the previous episode ended
+                if p.use_replay:
+                    ss_open.update(i_entry=i, x_entry=ekf.x.copy(), P_entry=ekf.P.copy())
+                aided, u_fwd, pending = False, None, None                    # a launch axis never outlives a standstill
+                stat_start, rest_sum, rest_cnt = i, np.zeros(2), 0
+                ss_acc_sum, ss_w_sum, ss_n_rows, ss_confirmed = 0.0, 0.0, 0, False   # S1b: a fresh rest-signature accumulator
         if stationary and stat_start is not None and i - REST_DELAY >= stat_start:
             rest_sum += (ax[i - REST_DELAY], ay[i - REST_DELAY]); rest_cnt += 1
             if rest_cnt >= p.launch_min_rest:
                 b_h_last = rest_sum / rest_cnt
+        if stationary:
+            ss_acc_sum += acc_var[i]; ss_w_sum += w_std[i]; ss_n_rows += 1     # S1b: rest-signature accumulator
 
         # ── B3b: evaluate the launch once its window (release + 2 s) is complete ──
         if pending is not None and i >= pending["i_rel"] + p.launch_n_after:
@@ -507,6 +670,34 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         # ── GNSS (new fixes only, never inside the outage) ───────────────────
         usable = (new_fix[i] and not in_outage
                   and not (np.isfinite(sats[i]) and sats[i] < p.min_satellites))
+        if usable and p.use_self_cal and stationary and np.isfinite(spd[i]) and spd[i] < p.self_cal_confirm_speed and not ss_confirmed:
+            # S1b: this fix CONFIRMS the current episode is a real stop -> fold its rest signature into the learned average
+            if ss_n_rows > 0:
+                learn_acc_sum += ss_acc_sum / ss_n_rows; learn_w_sum += ss_w_sum / ss_n_rows; learn_n += 1
+            ss_confirmed = True
+        if (p.use_anticascade or p.use_replay) and usable and np.isfinite(spd[i]) and spd[i] > p.anticascade_speed:
+            # S1c/S1d trigger: a new fix says we are moving, during or shortly after a standstill (GNSS-contradicted)
+            contra = ss_open if ss_open is not None else (ss_log[-1] if ss_log and (t - ss_log[-1]["t_exit"]) <= p.anticascade_lookback_s else None)
+            if contra is not None:
+                if p.use_anticascade:
+                    block_vgate_until = t + p.anticascade_block_s
+                if p.use_replay and "x_entry" in contra and (t - contra["t_enter"]) <= p.replay_buffer_s:
+                    i_entry = contra["i_entry"]
+                    xr, Pr, replayed = _replay_span(i_entry, i, contra["x_entry"], contra["P_entry"], ekf.nx, p,
+                                                    ts, dts, wv, fixE, fixN, spd, brg, acc, sats, new_fix, outage_window)
+                    ekf.x, ekf.P = xr, Pr
+                    for i2, E2, N2, psi2, v2, P2r in replayed:
+                        k = i2 - 1                                     # output-row index (results start at row 1)
+                        if 0 <= k < len(pos_out):
+                            pos_out[k] = [lat0 + np.degrees(N2 / R_EARTH), lon0 + np.degrees(E2 / (R_EARTH * cos0))]
+                            v_out[k] = v2; hd_out[k] = float(psi2 * RAD2DEG)
+                            cov_tr[k] = float(P2r[0, 0] + P2r[1, 1])
+                            cov_m[k] = [round(float(P2r[0, 0]), 4), round(float(P2r[1, 1]), 4), round(float(P2r[0, 1]), 4)]
+                            st_out[k] = False
+                    replay_log.append(dict(t=float(t), t_enter=contra["t_enter"], i_entry=i_entry, i_now=i))
+                    ss_log[:] = [e for e in ss_log if e.get("i_entry", -1) != i_entry]      # the erased episode never happened
+                    if ss_open is not None and ss_open.get("i_entry", -1) == i_entry:
+                        ss_open = None
         if usable and stationary and np.isfinite(spd[i]) and spd[i] > p.gnss_moving_speed:
             stationary = False                                   # GNSS says we are moving: the IMU detector was wrong
             if ss_open is not None:
@@ -641,6 +832,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         # vehicle_dr extras
         "stationary": st_out,
         "standstill_log": ss_log,            # S0: one dict per standstill episode: t_enter, entry branch (via_v_gate / via_override), t_exit, exit reason
+        "replay_log": replay_log,            # S1d: one record per retroactive replay (diagnostics)
         "aided": aided_out,
         "launches": launches,
         "mount_calibration": mount_cal,

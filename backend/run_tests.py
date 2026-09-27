@@ -41,7 +41,9 @@ UNIT_MODULES = [
     "tests.test_vehicle_dr",    # sandbox (sim_drive) + vehicle_dr filter
     "tests.test_eval_e0",       # E0 evaluation upgrade (window plan, along/cross, sliding windows)
     "tests.test_gyro_scale",    # H1a causal gyro-scale calibration (sandbox pass criteria P1-P3)
-    "tests.test_stationarity",  # S0 stationarity audit + standstill log (S1 variants add their sandbox criteria here)
+    "tests.test_stationarity",  # S0 stationarity audit + standstill log
+    "tests.test_s1_stationarity_fixes",  # S1a-S1e detector-fix mechanisms (unit level; all flags OFF by default)
+    "tests.test_s1_sandbox_suite",       # S1 sandbox criteria (i)-(iv) + the real-data acceptance-rule pin
 ]
 
 INTEGRATION_MODULES = [
@@ -61,6 +63,8 @@ LAYER_DESCRIPTIONS = {
     "tests.test_eval_e0":          "Layer 1+2 — E0 scoring: window plan, along/cross, sliding 60 s windows (sandbox)",
     "tests.test_gyro_scale":       "Layer 1+2 — H1a gyro-scale calibration on the synthetic sandbox (P1-P3)",
     "tests.test_stationarity":     "Layer 1+2 — S0 stationarity audit and standstill log (sandbox + S3b pin)",
+    "tests.test_s1_stationarity_fixes": "Layer 1+2 — S1a-S1e detector-fix mechanisms (sandbox)",
+    "tests.test_s1_sandbox_suite":      "Layer 1+2 — S1 sandbox criteria (i)-(iv) + real-data acceptance-rule pin",
     "tests.test_pipeline":         "Layer 2 — End-to-end pipeline (unit + full integration)",
     "tests.test_json_schema":      "Layer 3 — JSON export schema validation",
 }
