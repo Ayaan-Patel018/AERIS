@@ -45,6 +45,7 @@ UNIT_MODULES = [
     "tests.test_s1_stationarity_fixes",  # S1a-S1e detector-fix mechanisms (unit level; all flags OFF by default)
     "tests.test_s1_sandbox_suite",       # S1 sandbox criteria (i)-(iv) + the real-data acceptance-rule pin
     "tests.test_i2a_ou_speed_prior",     # I2a OU speed prior: mechanics + sandbox criteria (a)-(d)
+    "tests.test_i2b_turn_ceiling",       # I2b turn speed ceiling: mechanics + adopted-default regression
 ]
 
 INTEGRATION_MODULES = [
@@ -67,6 +68,7 @@ LAYER_DESCRIPTIONS = {
     "tests.test_s1_stationarity_fixes": "Layer 1+2 — S1a-S1e detector-fix mechanisms (sandbox)",
     "tests.test_s1_sandbox_suite":      "Layer 1+2 — S1 sandbox criteria (i)-(iv) + real-data acceptance-rule pin",
     "tests.test_i2a_ou_speed_prior":    "Layer 1+2 — I2a OU speed prior (sandbox mechanics + criteria a-d)",
+    "tests.test_i2b_turn_ceiling":       "Layer 1+2 — I2b turn speed ceiling (mechanics + adopted-default regression)",
     "tests.test_pipeline":         "Layer 2 — End-to-end pipeline (unit + full integration)",
     "tests.test_json_schema":      "Layer 3 — JSON export schema validation",
 }

@@ -117,6 +117,20 @@ class VDRParams:
     sigma_cent: float = 1.0          # m/s²   measurement noise (inflated: forward accel + vibration + phone frame)
     cent_res: float = 0.6            # m/s²   residual-acceleration floor in the model
     cent_bg_coupling: bool = False   # False: omega is treated as known, so the update cannot steer the gyro bias
+    # I2b — turn speed ceiling (mount-free, INEQUALITY ONLY: never pushes v up). In a real turn (|omega - b_g| >
+    # ceil_w_min) the measured horizontal accel magnitude bounds how fast the car can plausibly be going; if the
+    # filter's v implies MORE centripetal accel than that (+ a margin), pull v DOWN toward the bound (a normal scalar
+    # EKF update toward v_ceil, triggered only when v_est > v_ceil, so it is a one-sided cap in practice: never
+    # triggered when v_est <= v_ceil). Adopted (2026-09-27, on top of R1 — I2a has no winner): ceil_mode="fixed",
+    # ceil_a_max=3.0 clears the noise rule on both drives (S3b dev median end -17.7% exact, S2 -3.4% confirmed on
+    # the full 861-window list, p90 stable on both) and barely fires during correctly-tracked driving (GNSS
+    # available: 7 of 5683 sandbox rows, no accuracy change) — see AERIS_FINDINGS.md I2b.
+    use_turn_ceil: bool = True
+    ceil_w_min: float = 0.15         # rad/s: |omega - b_g| above this = "in a turn" (ceiling active)
+    ceil_margin: float = 0.6         # m/s²   margin m (grid 0.3-1.0)
+    ceil_mode: str = "fixed"         # "fixed" = a fixed comfort ceiling (adopted); "ah" = |a_h|_1s (mount-free, measured)
+    ceil_a_max: float = 3.0          # m/s²   used when ceil_mode == "fixed" (grid 2.5/3.0/4.0; adopted)
+    sigma_turn_ceil: float = 0.5     # m/s    measurement noise of the v_ceil pseudo-measurement
     # B3d — phi-gated FIXED mount aiding (calibrated on data before mount_cal_t only)
     use_fixed_mount: bool = False    # B3d: gate works and the sandbox gains 3x, but S1 validation shows no benefit (see AERIS_FINDINGS.md): off by default
     mount_cal_t: float = 200.0       # s: calibration phase = data before this time; the fixed phi is usable from this time on
@@ -335,7 +349,7 @@ class _EKF:
         self.consec_pos_rej = 0
         self.last_ou_active = False
         self.gate_log = []
-        self.counts = {"pos": [0, 0], "speed": [0, 0], "course": [0, 0], "cent": [0, 0], "lat": [0, 0]}   # [accepted, rejected]
+        self.counts = {"pos": [0, 0], "speed": [0, 0], "course": [0, 0], "cent": [0, 0], "lat": [0, 0], "turn_ceil": [0, 0]}   # [accepted, rejected]
 
     # ── time update ───────────────────────────────────────────────────────────
     def predict(self, dt, omega, stationary, a_fwd=None, k_gyro=1.0, ou=None):
@@ -522,6 +536,12 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
     _, vx = _causal_window_stats(ax, p.win)
     _, vy = _causal_window_stats(ay, p.win)
     acc_var = vx + vy
+    if p.use_turn_ceil and p.ceil_mode == "ah":
+        mean_ax_1s, _ = _causal_window_stats(ax, p.win)        # I2b: 1 s mean horizontal accel magnitude, mount-free
+        mean_ay_1s, _ = _causal_window_stats(ay, p.win)
+        ah_1s = np.sqrt(mean_ax_1s ** 2 + mean_ay_1s ** 2)
+    else:
+        ah_1s = None
 
     v0 = float(spd[first]) if np.isfinite(spd[first]) else 0.0
     ekf = _EKF(p, v0)
@@ -820,6 +840,17 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
                 Hc[0, 4] = (-v * v * ws / h) if p.cent_bg_coupling else 0.0
                 ok = ekf.update(np.array([z - h]), Hc, np.array([[p.sigma_cent ** 2]]), 1, "cent", t)
                 ekf.counts["cent"][0 if ok else 1] += 1
+
+        # ── I2b: turn speed ceiling (mount-free, INEQUALITY ONLY — never pushes v up) ──
+        if p.use_turn_ceil and not stationary:
+            wdev = abs(w_mean[i] - ekf.x[4])
+            if wdev > p.ceil_w_min:
+                bound = float(ah_1s[i]) if p.ceil_mode == "ah" else p.ceil_a_max
+                v_ceil = (bound + p.ceil_margin) / wdev
+                if ekf.x[3] * wdev > bound + p.ceil_margin:            # <=> ekf.x[3] > v_ceil: only pull v DOWN
+                    H1 = np.zeros((1, ekf.nx)); H1[0, 3] = 1.0
+                    ok = ekf.update(np.array([v_ceil - ekf.x[3]]), H1, np.array([[p.sigma_turn_ceil ** 2]]), 1, "turn_ceil", t)
+                    ekf.counts["turn_ceil"][0 if ok else 1] += 1
 
         # ── B3d: with a trusted fixed mount ──────────────────────────────────
         if fixed_on:

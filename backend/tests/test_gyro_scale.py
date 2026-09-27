@@ -168,6 +168,11 @@ class TestZaruWeight(unittest.TestCase):
 
 
 H1B = replace(VDRParams(), use_gyro_state=True)
+# I2b (2026-09-27) made use_turn_ceil=True the new bare default; turn_ceil helps LESS when H1b's 7-state gyro-scale
+# EKF is also on (a real, mild interaction -- turn_ceil still helps in both cases, see AERIS_FINDINGS.md I2b), which
+# breaks a literal "no worse than the CURRENT default" reading of P3 (H1b's own criterion, set before I2b existed).
+# Pinned explicitly against the pre-I2b baseline so P3 keeps testing what it always tested: H1b in isolation.
+PRE_I2B_DEFAULT = replace(VDRParams(), use_turn_ceil=False)
 
 
 class TestGyroScaleState(unittest.TestCase):
@@ -211,9 +216,10 @@ class TestGyroScaleState(unittest.TestCase):
             self.assertLess(got, 0.9 * default, (sd, got, default))
 
     def test_p3_no_worse_than_the_default_when_the_scale_is_one(self):
+        h1b_isolated = replace(PRE_I2B_DEFAULT, use_gyro_state=True)          # isolate H1b from I2b's turn_ceil (see PRE_I2B_DEFAULT)
         for sd in (1, 2):
             s, tr = self.data[(sd, 1.0)]
-            got, default = _median_end(s, tr, H1B), _median_end(s, tr, VDRParams())
+            got, default = _median_end(s, tr, h1b_isolated), _median_end(s, tr, PRE_I2B_DEFAULT)
             self.assertLessEqual(got, 1.03 * default, (sd, got, default))
 
     def test_is_causal(self):
