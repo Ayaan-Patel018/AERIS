@@ -46,21 +46,22 @@ def load_dev(drive):
 
 
 def _task(args):
-    drive, starts, params, run_kw = args
+    drive, starts, params, run_kw = args[:4]
+    audit = len(args) > 4 and args[4]                                  # S0: also return the stationarity audit of each outage span
     s, _, _, truth, _ = load_dev(drive)
-    return co.window_benchmark(s, truth, starts, params=params, run_kw=run_kw)
+    return co.window_benchmark(s, truth, starts, params=params, run_kw=run_kw, audit=audit)
 
 
-def window_rows(drive, params, pool=None, workers=4, run_kw=None, stride=1):
+def window_rows(drive, params, pool=None, workers=4, run_kw=None, stride=1, audit=False):
     """stride > 1 = screening run: every stride-th registered window of a drive with more than 24 windows (S2). S3b is never thinned."""
     starts = load_dev(drive)[4] if pool is None else _starts_only(drive)
     if len(starts) > 24:
         starts = starts[::stride]
     if pool is None or len(starts) <= 24:
-        return _task((drive, starts, params, run_kw))
+        return _task((drive, starts, params, run_kw, audit))
     k = workers * 3
     chunks = [starts[i::k] for i in range(k)]                            # interleaved: window cost grows with the start time
-    rows = [r for part in pool.map(_task, [(drive, c, params, run_kw) for c in chunks if c]) for r in part]
+    rows = [r for part in pool.map(_task, [(drive, c, params, run_kw, audit) for c in chunks if c]) for r in part]
     return sorted(rows, key=lambda r: r["start"])
 
 

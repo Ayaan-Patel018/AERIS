@@ -41,6 +41,7 @@ UNIT_MODULES = [
     "tests.test_vehicle_dr",    # sandbox (sim_drive) + vehicle_dr filter
     "tests.test_eval_e0",       # E0 evaluation upgrade (window plan, along/cross, sliding windows)
     "tests.test_gyro_scale",    # H1a causal gyro-scale calibration (sandbox pass criteria P1-P3)
+    "tests.test_stationarity",  # S0 stationarity audit + standstill log (S1 variants add their sandbox criteria here)
 ]
 
 INTEGRATION_MODULES = [
@@ -59,6 +60,7 @@ LAYER_DESCRIPTIONS = {
     "tests.test_vehicle_dr":       "Layer 1+2 — vehicle_dr filter on the synthetic sandbox (sim_drive)",
     "tests.test_eval_e0":          "Layer 1+2 — E0 scoring: window plan, along/cross, sliding 60 s windows (sandbox)",
     "tests.test_gyro_scale":       "Layer 1+2 — H1a gyro-scale calibration on the synthetic sandbox (P1-P3)",
+    "tests.test_stationarity":     "Layer 1+2 — S0 stationarity audit and standstill log (sandbox + S3b pin)",
     "tests.test_pipeline":         "Layer 2 — End-to-end pipeline (unit + full integration)",
     "tests.test_json_schema":      "Layer 3 — JSON export schema validation",
 }

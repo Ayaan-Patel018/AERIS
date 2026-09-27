@@ -409,6 +409,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
     REST_DELAY = 12                                 # rest baseline uses samples older than 1.2 s
     psi_init_t = None
     zaru_count = 0
+    ss_log, ss_open, ss_last_exit = [], None, -1e9   # S0 audit (diagnostics only, never read by the filter): one record per standstill episode
     # H1a gyro-scale calibration state: cum[i] = integral of the UNCORRECTED (omega - b_g) up to row i (0 while stationary,
     # exactly like psi's propagation); pairs of consecutive usable new fixes -> (t_b, x, y); k = fitted slope, 1.0 = uncorrected
     k_gs = 1.0
@@ -459,6 +460,9 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         if stationary:
             if acc_var[i] > p.acc_var_exit or wm > p.w_exit or mean_release:
                 stationary = False
+                if ss_open is not None:
+                    ss_open.update(t_exit=float(t), exit="acc_var" if acc_var[i] > p.acc_var_exit else ("omega" if wm > p.w_exit else "release"))
+                    ss_log.append(ss_open); ss_open, ss_last_exit = None, float(t)
                 ekf.P[3, 3] = max(ekf.P[3, 3], p.launch_sigma_v ** 2)   # the speed is no longer pinned to 0
                 block_until = t + (p.launch_n_after + 5) * 0.1
                 if p.use_launch and stat_start is not None:              # IMU release: prepare a launch calibration
@@ -468,6 +472,10 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
                         launches.append(dict(t_release=float(ts[i]), reason="no rest baseline", accepted=False))
         elif i >= p.win and quiet and t >= block_until and (abs(v_est) < p.v_gate or (p.use_launch and quiet_run >= p.quiet_enter_n)):
             stationary = True
+            ss_open = dict(t_enter=float(t), v_est=float(v_est), quiet_run=int(quiet_run), acc_var=float(acc_var[i]), w_dev=float(wm),
+                           via_v_gate=bool(abs(v_est) < p.v_gate),                       # branch A: the speed estimate is already low
+                           via_override=bool(p.use_launch and quiet_run >= p.quiet_enter_n),   # branch B: 3 s of sustained quiet
+                           gap_prev=float(t - ss_last_exit))                              # seconds since the previous episode ended
             aided, u_fwd, pending = False, None, None                    # a launch axis never outlives a standstill
             stat_start, rest_sum, rest_cnt = i, np.zeros(2), 0
         if stationary and stat_start is not None and i - REST_DELAY >= stat_start:
@@ -501,6 +509,9 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
                   and not (np.isfinite(sats[i]) and sats[i] < p.min_satellites))
         if usable and stationary and np.isfinite(spd[i]) and spd[i] > p.gnss_moving_speed:
             stationary = False                                   # GNSS says we are moving: the IMU detector was wrong
+            if ss_open is not None:
+                ss_open.update(t_exit=float(t), exit="gnss", gnss_speed=float(spd[i]))
+                ss_log.append(ss_open); ss_open, ss_last_exit = None, float(t)
             ekf.P[3, 3] = max(ekf.P[3, 3], p.launch_sigma_v ** 2)
         if usable and p.use_gyro_scale:
             # H1a: pair this fix with the previous usable new fix (past data only) and refit k = slope of y ~ k x
@@ -610,6 +621,9 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         bg_out.append(float(ekf.x[4]))
         flags.append("outage" if in_outage else "healthy")
 
+    if ss_open is not None:                                  # still standing when the run ends (or is truncated)
+        ss_open.update(t_exit=float(t_out[-1]) if t_out else float(ts[0]), exit="end")
+        ss_log.append(ss_open)
     return {
         "mode": "vehicle_dr",
         "outage_window": outage_window,
@@ -626,6 +640,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         "zaru_trigger_count": zaru_count,
         # vehicle_dr extras
         "stationary": st_out,
+        "standstill_log": ss_log,            # S0: one dict per standstill episode: t_enter, entry branch (via_v_gate / via_override), t_exit, exit reason
         "aided": aided_out,
         "launches": launches,
         "mount_calibration": mount_cal,

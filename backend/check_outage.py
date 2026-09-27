@@ -266,17 +266,30 @@ class Truth:
     DIR_HALF_S = 0.5
     MIN_MOVE_M = 0.3
 
-    def __init__(self, rt, xy, speed, off=0.0):
+    def __init__(self, rt, xy, speed, off=0.0, yaw_rate=None):
         self.rt, self.xy, self.off = np.asarray(rt, float), np.asarray(xy, float), float(off)
         sp = np.asarray(speed, float)
         ok = np.isfinite(sp)
         self.spd = np.interp(self.rt, self.rt[ok], sp[ok]) if ok.any() else np.zeros(len(self.rt))
+        yw = np.asarray(yaw_rate, float) if yaw_rate is not None else np.full(len(self.rt), np.nan)     # rad/s (S0 audit; NaN = not available)
+        oky = np.isfinite(yw)
+        self.yaw = np.interp(self.rt, self.rt[oky], yw[oky]) if oky.any() else np.full(len(self.rt), np.nan)
         self._dir = self._directions()
 
     @classmethod
     def from_vehicle(cls, v_df, lat0, lon0, off):
         _, ref, ref_enu, rt = _truth_fn(v_df, lat0, lon0, off)
-        return cls(rt, ref_enu, ref["gps_speed_ms"].values, off)
+        yaw = np.radians(ref["yaw_rate_degs"].values.astype(float)) if "yaw_rate_degs" in ref else None
+        return cls(rt, ref_enu, ref["gps_speed_ms"].values, off, yaw)
+
+    def covers(self, t):
+        """True where the phone time t maps inside the reference file (np.interp clamps outside it: such rows must not be scored)."""
+        tv = np.asarray(t, dtype=float) + self.off
+        return (tv >= self.rt[0]) & (tv <= self.rt[-1])
+
+    def yaw_rate(self, t):
+        """Reference yaw rate (rad/s, signed) at phone time t; NaN when the reference has no yaw-rate column."""
+        return np.interp(np.asarray(t, dtype=float) + self.off, self.rt, self.yaw)
 
     def pos(self, t):
         t = np.asarray(t, dtype=float) + self.off
@@ -375,11 +388,12 @@ def baseline_tracks(s_df, fix_rows, start, t, lat0, lon0):
     return cv, np.full(len(t), v), np.tile(pa, (len(t), 1))
 
 
-def window_benchmark(s_df, truth, starts, params=None, length=WINDOW_S, run_kw=None):
+def window_benchmark(s_df, truth, starts, params=None, length=WINDOW_S, run_kw=None, audit=False):
     """
     Simulate a `length` s GNSS outage starting at each t in `starts` (vehicle_dr; GNSS hidden on [start, start+length]) and
     score the outage rows. The filter is causal, so each run is truncated at the window end (exactness is unit-tested).
     Returns one dict per window: start, and score_track() dicts for 'vdr', 'cv' (const-velocity) and 'hold' baselines.
+    audit=True adds row["audit"] = stationarity_audit() restricted to the outage span [start, start + length] (S0).
     """
     import vehicle_dr
     lat0, lon0 = origin(s_df)
@@ -402,6 +416,8 @@ def window_benchmark(s_df, truth, starts, params=None, length=WINDOW_S, run_kw=N
                         vdr=score_track(truth, tw, _res_enu(res, m), np.array(res["velocities"])[m], np.array(res["cov_matrix"])[m]),
                         cv=score_track(truth, tw, cv, vcv), hold=score_track(truth, tw, hold, np.zeros(len(tw))),
                         gate_counts=res.get("gate_counts")))
+        if audit:
+            out[-1]["audit"] = stationarity_audit(res, truth, span=(s0, s1))
     return out
 
 
@@ -446,6 +462,160 @@ def window_report(rows, scope, label="vehicle_dr", per_window=None):
             print(f"{r['start']:7.0f} | {v['mean_err']:7.1f}{v['end_err']:8.1f}{v['along_end']:+8.1f}{v['cross_end']:+8.1f}"
                   f"{v['path_ratio']:7.2f}{v.get('inside', float('nan')):6.0f} | {c['mean_err']:9.1f}{c['end_err']:9.1f}")
     return summ
+
+
+# ══ S0 — stationarity audit (VBOX = SCORING ONLY) ═════════════════════════════════════════════════════════════════
+MOVE_MPS = 0.5            # VBOX speed above this = moving; a flagged standstill at this speed is a FALSE standstill
+STOP_MPS = 0.2            # VBOX speed below this = truly stopped
+FALSE_EP_MIN_S = 1.0      # a flagged episode is a "false episode" if it holds at least this many seconds of false standstill
+AUDIT_SUMS = ("time", "moving", "stopped", "flagged", "false", "stopped_flagged", "dist_lost", "turn_lost", "path", "turn_total", "missed", "missed_dist")
+
+
+def stationarity_audit(res, truth, span=None):
+    """
+    Audit the vehicle_dr IMU-only standstill flag against the reference (VBOX) motion. Rows are weighted by their real time step;
+    only rows inside the reference file (and inside `span` = (t0, t1), e.g. an outage window) count. Definitions:
+      false standstill  = flag set AND reference speed > MOVE_MPS            (the filter freezes v and drops the turn rate)
+      true-stop recall  = flagged time / time with reference speed < STOP_MPS
+      distance lost     = integral of the reference speed over the false-standstill time
+      turning lost      = integral of |reference yaw rate| over the same time (rad)
+      missed stop       = reference stopped (speed < STOP_MPS) but NOT flagged: the filter keeps its speed and "drives" on the spot;
+                          missed distance = integral of the filter's own speed over that time (the mirror-image damage)
+    Each standstill episode (res["standstill_log"]) is scored on its own: entry branch (v_gate = the speed estimate was already
+    below v_gate; override = only the sustained-quiet `quiet_enter_n` branch could have fired), exit reason, false seconds,
+    reference speed at entry, and kind = "false entry" (entered while the reference was moving) or "late release" (entered at rest,
+    the car then moved on while the flag stayed set).
+    """
+    t = np.asarray(res["timestamps"], float)
+    flag = np.asarray(res["stationary"], bool)
+    dt = np.r_[np.median(np.diff(t)) if len(t) > 1 else 0.1, np.diff(t)]
+    use = truth.covers(t)
+    if span is not None:
+        use &= (t >= span[0]) & (t <= span[1])
+    v = truth.speed(t)
+    w = np.abs(truth.yaw_rate(t))
+    w = np.where(np.isfinite(w), w, 0.0)
+    moving, stopped = v > MOVE_MPS, v < STOP_MPS
+    false = flag & moving
+    missed = stopped & ~flag
+    v_filter = np.abs(np.asarray(res["velocities"], float))
+
+    def sec(m):
+        return float(dt[m & use].sum())
+
+    out = dict(time=sec(np.ones(len(t), bool)), moving=sec(moving), stopped=sec(stopped), flagged=sec(flag), false=sec(false),
+               stopped_flagged=sec(flag & stopped), dist_lost=float((v * dt)[false & use].sum()), turn_lost=float((w * dt)[false & use].sum()),
+               path=float((v * dt)[moving & use].sum()), turn_total=float((w * dt)[moving & use].sum()),
+               missed=sec(missed), missed_dist=float((v_filter * dt)[missed & use].sum()),
+               holes=int(np.sum((dt > 1.0) & use)),
+               false_v_med=float(np.median(v[false & use])) if (false & use).any() else float("nan"),
+               false_v_max=float(v[false & use].max()) if (false & use).any() else float("nan"),
+               flag_v_med=float(np.median(v[flag & use])) if (flag & use).any() else float("nan"),
+               flag_v_max=float(v[flag & use].max()) if (flag & use).any() else float("nan"))
+    eps = []
+    for e in res.get("standstill_log", []):
+        te = e["t_exit"]
+        r = (t >= e["t_enter"]) & ((t <= te) if e.get("exit") == "end" else (t < te)) & use
+        if not r.any():
+            continue
+        f = r & moving
+        v_in = float(truth.speed([e["t_enter"]])[0]) if truth.covers([e["t_enter"]])[0] else float("nan")
+        eps.append(dict(t_enter=e["t_enter"], t_exit=te, dur=float(dt[r].sum()), false_s=float(dt[f].sum()),
+                        branch="v_gate" if e["via_v_gate"] else ("override" if e["via_override"] else "?"),
+                        both=bool(e["via_v_gate"] and e["via_override"]), exit=e.get("exit", "?"), v_est=e["v_est"], gap_prev=e["gap_prev"],
+                        v_entry=v_in, kind="false entry" if v_in > MOVE_MPS else "late release",
+                        v_mean=float(np.average(v[f], weights=dt[f])) if f.any() else float("nan"), v_max=float(v[f].max()) if f.any() else float("nan"),
+                        dist_lost=float((v * dt)[f].sum()), turn_lost=float((w * dt)[f].sum()),
+                        in_span=span is None or span[0] <= e["t_enter"] <= span[1]))
+    out["episodes"] = eps
+    out["n_episodes"] = len(eps)
+    out["n_false"] = sum(1 for e in eps if e["false_s"] >= FALSE_EP_MIN_S)
+    return out
+
+
+def _audit_lines(a, label):
+    mv = max(a["moving"], 1e-9)
+    print(f"--- stationarity audit ({label}) — VBOX used for scoring only; false = flagged AND VBOX speed > {MOVE_MPS} m/s ---")
+    print(f"time scored {a['time']:.0f} s (VBOX moving {a['moving']:.0f} s, stopped < {STOP_MPS} m/s {a['stopped']:.0f} s); "
+          f"flagged {a['flagged']:.1f} s in {a['n_episodes']} episodes{' (data holes: %d)' % a['holes'] if a.get('holes') else ''}")
+    print(f"FALSE-standstill time      : {a['false']:8.1f} s = {100 * a['false'] / mv:5.2f} % of moving time, {100 * a['false'] / max(a['flagged'], 1e-9):4.1f} % of flagged time; "
+          f"{a['n_false']} false episodes (>= {FALSE_EP_MIN_S:.0f} s of false time) of {a['n_episodes']}")
+    print(f"VBOX speed while falsely flagged: median {a['false_v_med']:.2f} / max {a['false_v_max']:.2f} m/s;   while flagged (all): median {a['flag_v_med']:.2f} / max {a['flag_v_max']:.2f} m/s")
+    print(f"true-stop recall           : {100 * a['stopped_flagged'] / max(a['stopped'], 1e-9):5.1f} %  ({a['stopped_flagged']:.1f} of {a['stopped']:.1f} s of VBOX-stopped time is flagged)")
+    print(f"damage while falsely frozen: distance lost {a['dist_lost']:.1f} m ({100 * a['dist_lost'] / max(a['path'], 1e-9):.2f} % of the {a['path']:.0f} m driven), "
+          f"turning lost {np.degrees(a['turn_lost']):.0f} deg ({100 * a['turn_lost'] / max(a['turn_total'], 1e-9):.2f} % of {np.degrees(a['turn_total']):.0f} deg turned)")
+    print(f"mirror image (missed stops): {a['missed']:.1f} s of VBOX-stopped time NOT flagged; the filter's own speed integrates to {a['missed_dist']:.1f} m of phantom driving during it")
+
+
+def audit_report(a, label, top=12):
+    """Print the whole-run audit: totals, entry-branch split of the false episodes, and the `top` worst false episodes."""
+    _audit_lines(a, label)
+    fe = sorted([e for e in a["episodes"] if e["false_s"] >= FALSE_EP_MIN_S], key=lambda e: -e["false_s"])
+    for br in ("v_gate", "override"):
+        sel = [e for e in fe if e["branch"] == br]
+        print(f"  false episodes entered via {br:8s}: {len(sel):3d}  ({sum(e['false_s'] for e in sel):7.1f} s false, {sum(e['dist_lost'] for e in sel):7.0f} m lost"
+              f"{', %d of them with both branches true' % sum(e['both'] for e in sel) if br == 'v_gate' else ''})")
+    for kd in ("false entry", "late release"):
+        sel = [e for e in fe if e["kind"] == kd]
+        print(f"  false episodes, {kd:12s}: {len(sel):3d}  ({sum(e['false_s'] for e in sel):7.1f} s false)   "
+              f"[false entry = flag set while VBOX moving; late release = flag set at rest, the car then drove off while it stayed set]")
+    if fe:
+        print(f"  worst {min(top, len(fe))} false episodes (t_enter-t_exit s, dur, false s, kind, branch, exit, VBOX v at entry / mean / max m/s, v_est at entry, gap to previous episode s, m lost, deg lost):")
+        for e in fe[:top]:
+            print(f"    {e['t_enter']:8.1f}-{e['t_exit']:8.1f}  {e['dur']:5.1f}  {e['false_s']:5.1f}  {e['kind']:12s} {e['branch']:8s}{'*' if e['both'] else ' '} {e['exit']:8s}"
+                  f" {e['v_entry']:5.2f} / {e['v_mean']:5.2f} / {e['v_max']:5.2f}  v_est {e['v_est']:5.2f}  gap {min(e['gap_prev'], 9999):7.1f}  {e['dist_lost']:6.1f} m  {np.degrees(e['turn_lost']):6.1f} deg")
+        print("    (* = both entry branches were true; attributed to v_gate because that branch alone would have sufficed)")
+
+
+def audit_windows_report(rows, label):
+    """Aggregate the per-window audits (window_benchmark(..., audit=True)) over the outage spans; windows overlap, so the sums count
+    each stretch of driving several times — read them as fractions, not as absolute seconds."""
+    aud = [r["audit"] for r in rows]
+    tot = {k: sum(a[k] for a in aud) for k in AUDIT_SUMS}
+    tot.update(holes=sum(a["holes"] for a in aud))
+    allv = [(e, a) for a in aud for e in a["episodes"]]
+    fs = np.array([a["false"] for a in aud])
+    mv = max(tot["moving"], 1e-9)
+    print(f"--- stationarity audit ({label}): outage spans of {len(rows)} windows (60 s each; GNSS hidden, windows overlap) ---")
+    print(f"time in spans {tot['time']:.0f} s (VBOX moving {tot['moving']:.0f} s, stopped {tot['stopped']:.0f} s); flagged {tot['flagged']:.0f} s")
+    print(f"FALSE-standstill time      : {tot['false']:.0f} s = {100 * tot['false'] / mv:5.2f} % of moving time in the spans, {100 * tot['false'] / max(tot['flagged'], 1e-9):4.1f} % of flagged time")
+    print(f"per window (false s in the 60 s span): median {np.median(fs):.1f}, p90 {np.percentile(fs, 90):.1f}, max {fs.max():.1f};  windows with >= 1 s: {100 * np.mean(fs >= 1):.0f} %, >= 5 s: {100 * np.mean(fs >= 5):.0f} %, >= 20 s: {100 * np.mean(fs >= 20):.0f} %")
+    print(f"true-stop recall in the spans: {100 * tot['stopped_flagged'] / max(tot['stopped'], 1e-9):5.1f} %   "
+          f"damage: distance lost {100 * tot['dist_lost'] / max(tot['path'], 1e-9):.2f} % of the driven distance, turning lost {100 * tot['turn_lost'] / max(tot['turn_total'], 1e-9):.2f} % of the turning;  "
+          f"missed stops: {tot['missed']:.0f} s, {tot['missed_dist']:.0f} m of phantom driving ({100 * tot['missed_dist'] / max(tot['path'], 1e-9):.2f} % of the driven distance)")
+    seen = {}
+    for e, a in allv:
+        if e["false_s"] >= FALSE_EP_MIN_S:
+            seen.setdefault(round(e["t_enter"] / 0.5) * 0.5, e)               # distinct episodes: same entry time (0.5 s) in overlapping windows
+    ent = [e for e in seen.values() if e["in_span"]]
+    print(f"distinct false episodes seen in the spans: {len(seen)} (entered inside an outage span: {len(ent)}, carried in from before it: {len(seen) - len(ent)}); "
+          f"by entry branch: v_gate {sum(e['branch'] == 'v_gate' for e in seen.values())}, override {sum(e['branch'] == 'override' for e in seen.values())}; "
+          f"kind: false entry {sum(e['kind'] == 'false entry' for e in seen.values())}, late release {sum(e['kind'] == 'late release' for e in seen.values())}")
+
+
+def audit_main(drive, unseal=False, windows=False, workers=4, params=None, top=12):
+    """`--audit`: whole-drive run (no outage) of the current default, then (with --audit-windows) the same audit on the outage spans of the drive's windows
+    (S3b: the 11 tuning windows; every other drive: all valid windows, worker pool)."""
+    guard_drive(drive, unseal)
+    import vehicle_dr
+    s_df, v_df, off = load_drive(drive)
+    res = vehicle_dr.run_pipeline(s_df, None, outage_window=None, params=params)
+    truth = Truth.from_vehicle(v_df, res["lat0"], res["lon0"], off)
+    a = stationarity_audit(res, truth)
+    audit_report(a, f"{drive}, whole drive, no outage", top)
+    wa = None
+    if windows:
+        import dev_eval
+        p = params or vehicle_dr.VDRParams()
+        if drive == "S3b":
+            rows = dev_eval.window_rows(drive, p, pool=None, audit=True)
+        else:
+            with dev_eval.open_pool(workers) as pool:
+                rows = dev_eval.window_rows(drive, p, pool=pool, workers=workers, audit=True)
+        print()
+        audit_windows_report(rows, f"{drive}")
+        wa = rows
+    return a, wa
 
 
 def main(drive="S3b", filt="esekf", fixes_only=False, mini_only=False, windows="auto", unseal=False, per_window=None):
@@ -499,5 +669,15 @@ if __name__ == "__main__":
                     help="sliding 60 s outages (vehicle_dr): auto = S3b tuning set only; all = every valid window (slow on long drives)")
     ap.add_argument("--per-window", action="store_true", default=None, help="list every window (default: only when <= 20)")
     ap.add_argument("--unseal", action="store_true", help="allow scoring a reserved drive (S3c/S3a/S4) — only when its step is due")
+    ap.add_argument("--audit", action="store_true", help="S0 stationarity audit of vehicle_dr (whole drive, no outage; VBOX = scoring only) — replaces the normal report")
+    ap.add_argument("--audit-windows", action="store_true", help="with --audit: also audit the outage spans of the dev windows (S3b tuning set; other drives: all windows, worker pool)")
+    ap.add_argument("--set", action="append", help="with --audit: VDRParams override, e.g. --set use_brake_gate=True (repeatable)")
+    ap.add_argument("--workers", type=int, default=4, help="with --audit-windows on a long drive: worker processes")
+    ap.add_argument("--top", type=int, default=12, help="with --audit: how many of the worst false episodes to list")
     a = ap.parse_args()
-    main(a.drive, a.filter, a.fixes_only, a.mini_only, a.windows, a.unseal, a.per_window)
+    if a.audit:
+        import dev_eval
+        from vehicle_dr import VDRParams
+        audit_main(a.drive, a.unseal, a.audit_windows, a.workers, dev_eval.parse_set(VDRParams(), a.set), a.top)
+    else:
+        main(a.drive, a.filter, a.fixes_only, a.mini_only, a.windows, a.unseal, a.per_window)

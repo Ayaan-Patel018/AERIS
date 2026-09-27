@@ -69,6 +69,15 @@ def long_route():
     return r[:-1] + [("straight", 100.0, 10.0, 4.0)] + extra      # drop the final braking leg of default_route
 
 
+def smooth_cruise_route():
+    """S1 sandbox (i): ~2.2 km of steady 9 m/s cruising on a smooth road (gentle wide curves, no urban braking) with ONE real 20 s stop in
+    the middle. Meant for vib_base 0.05 / vib_per_ms 0.02 (also 0.03 / 0.01): the phone is then as quiet at 9 m/s as in the S1 acceptance
+    criteria's cruise case, so an IMU-only standstill detector that trusts 'quiet' alone flags the moving car as stationary."""
+    return [("straight", 300, 9, 9), ("turn", 40, 400, 9), ("straight", 400, 9, 9), ("turn", -60, 500, 9), ("straight", 300, 9, 0),
+            ("stop", 20), ("straight", 300, 9, 9), ("turn", 45, 450, 9), ("straight", 500, 9, 9), ("turn", -50, 400, 9),
+            ("straight", 400, 9, 9)]
+
+
 def multi_stop_route(turn_launch=False):
     """Repeated straight / stop cycles (5 launches in ~135 s) for launch-calibration tests. With turn_launch the
     car pulls away INTO a 90-degree junction turn, as in urban driving."""
@@ -247,6 +256,7 @@ def simulate(cfg: Optional[SimConfig] = None):
         "gps_heading_deg": true_bearing, "gps_speed_ms": v,
         "E": k["E"], "N": k["N"], "psi_rad": k["psi"], "v": v, "omega": omega,
         "a_fwd": a_fwd, "stationary": k["stationary"], "mount_deg": phi,
+        "yaw_rate_degs": np.rad2deg(omega),                     # true yaw rate (V-file column name) — scoring only (S0 audit: turning lost)
     })
     return s_df, truth
 

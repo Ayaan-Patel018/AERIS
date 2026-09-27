@@ -1,14 +1,16 @@
 # AERIS findings log
 
-# START HERE — handoff for a fresh session (state after H1 + H1c, 266 tests pass / 37 skipped; ONE default changed since 22ec79f: sigma_zaru 0.01 -> 0.10)
+# START HERE — handoff for a fresh session (state after S0, 284 tests pass / 37 skipped; NO filter default changed since H1c; sigma_zaru stays 0.01 -> 0.10)
 
-**E0 is accepted; H1 (gyro-scale calibration) is DONE and reported; the user reviews it before anything else.** Read, in this order: "DRIVE REGISTRY v2", "E0 review (external sandbox study)", "PLAN UPDATE: NEW ORDER H1 → I1 → I2 → I3"
-(the user's message, verbatim; the older "PLAN: E0 → D" text is kept for history), the two pre-registrations (S3c, S2), then the sections "H0", "H1" and "H1c" at the end of this file.
-**What H1 found:** (1) the gyro-scale hypothesis is REFUTED on real data (scale = 1.00 +/- 0.03 on S3b, S2, S1 by three independent estimators; the A2 "1.29" was two wrap-ambiguous pairs) -> H1a and H1b are correct on the sandbox but stay OFF;
-(2) the real lever was the gyro BIAS: ZARU at false / partial standstills dragged b_g onto real rotation -> wrong heading -> the hard gate rejected the repairing GNSS updates (the S1 "lock-out"). **H1c** (sigma_zaru 0.01 -> 0.10) fixed it:
-S3b dev windows median end 161.5 -> 126.0 m (hold 156.5), S2 (861 windows) 152.3 -> 130.6 m (hold 368.6), S1 mini mean 43.89 -> 16.77 m with the > 100 m tail gone (11.1 % -> 0 %). The event (report only) got 6-9 % worse.
-**Next step: I1a (GNSS latency), then I1b (robustness — the S1 lock-out is already gone, so I1b's job is now a safety net), then I2, I3 — only after the user says "go"** (the plan stops after H1 and again after I3, where the table must be shown).
-I4-I6, B4, B5, C, D wait for "go next". Optional follow-up idea (not started): learn b_g only from CONFIRMED standstills. Reference numbers changed with H1c — compare new work against the H1c row of the plan table below, not the E0 row.
+**Current step: S1 (stationarity detector fixes), in progress — S0 (audit) is DONE and logged; the user has NOT yet seen the S1 table.** Read, in this order: "DRIVE REGISTRY v2", "External sandbox study 2 — stationarity (after H1c)",
+"PLAN UPDATE: STATIONARITY S0 -> S1" (the user's message, verbatim), then "S0 — stationarity audit" at the end of this file. The H1/H1c material above it (gyro scale, ZARU weight) is settled and only needed for context.
+**What H1c left unfixed (why S0/S1 exist):** ZARU (sigma_zaru 0.10) stopped a false standstill from contaminating the gyro bias, but the standstill flag ALSO still forces v=0 (ZUPT) and drops rotation (w=0) whenever it fires — false or not.
+An external sandbox study found the detector freezes a 9 m/s cruise on a smooth road for hundreds of seconds (end error 788-799 m); tried fixes (disable the `quiet_enter_n` override, add a braking-evidence gate) each broke a different real case. **S0 (this session, real data, no filter change):**
+false-standstill time is small (S3b 1.96 %, S2 1.82 %, S1 1.39 % of moving time; > 1 % on both dev drives, so the plan continues to S1) and mostly short/slow (median 1.1-1.3 m/s) — the sandbox's 9 m/s multi-hundred-second freeze does not occur on these three real drives.
+**The bigger real finding: the MIRROR failure (missed stops) costs more than false standstills** (whole-drive phantom distance 81/590/465 m vs 28/197/81 m lost; S3b true-stop recall drops 70 % -> 32 % when GNSS is hidden, because with GNSS hidden only the 3 s quiet override can catch a stop) —
+worth keeping in mind when judging S1a (which restricts the override) against the plan's recall criterion (>= 0.8 x current).
+**Next step: S1 (S1a-S1e detector fixes), one at a time behind a flag, sandbox suite (i)-(iv) fixed before running each; stop after S1 and show the compact table (never seen yet).** Then, only on "go": I2a/I2b, I1a, a D-design proposal (OSM, proposal only), I3/I1b later.
+Reference numbers are UNCHANGED from H1c (S3b dev windows 126.0 / 211.6 / 103.4 / 73.1, S2 130.6 / 377.1 / 53.8 / 86.1) — S0 added no filter change, so compare S1 variants against the H1c row, not against S0.
 Per-step protocol (standing rules): sandbox test with a numeric pass criterion first -> real-data metrics (dev windows S3b + S2, noise rule: < 5 % = no change; keep a change only if it helps S3b AND S2 or helps one and is neutral on the other) -> row in the plan table below -> full suite passes -> commit + push;
 a failed step stays in the code behind a flag set to OFF, with the reason logged. Machine is SHARED (a game runs on it): use `dev_eval.py --workers 4` (30 workers ran out of memory), kill orphan python workers after stopping a job.
 
@@ -1019,3 +1021,103 @@ absolute 0.02 rad/s bound measured from the initial-prior state, where the prior
 **Caveats.** (a) The 200-260 s event (a single window that starts in a stop; report only) gets worse: mean 64.35 -> 68.60 m, end 145.89 -> 158.96 m, along/cross at the end -85.6 / +118.2 -> -100.3 / +123.3 m; the dev windows and S1 improve, so this is a documented cost, not a tuned quantity.
 (b) The launch-from-stop windows barely move (147.9 vs 151.2, -2 %): that regime is a speed problem (I2a), not this one. (c) sigma_zaru 0.1 is on a plateau, so ZARU is now nearly a formality; a better design would learn b_g only from CONFIRMED standstills (never while a launch is pending, VBOX-free criterion) — an optional follow-up, not needed for the result above.
 (d) The older note "S3b: 1 / 1 / 0 / 0" next to the S1 gate counts (known issue #1) does not match a whole-drive S3b run (18 course / 12 position / 1 speed rejections, 4 forced accepts under the old default, with the 200-260 s outage and the post-outage fixes included); I did not find which span it referred to. The S1 counts (107 / 94 / 1 / 29) reproduce exactly.
+
+
+# External sandbox study 2 — stationarity (after H1c) — logged 2026-09-27, from the user's message
+* H1c fixed only ONE of the damages a FALSE standstill causes (b_g contamination, via ZARU). While the filter believes it is stationary it ALSO forces v = 0 (ZUPT) and discards rotation (`w = 0` in `predict`, psi frozen).
+  H1 diagnostic 3 already showed false standstills on real data (29 % of S3b ZARU time at VBOX speed > 0.5 m/s; one episode 269.8-277.6 s at 7-8.9 m/s). Inside an outage that freezes the car and drops the turns, and there is no GNSS to recover.
+* External sandbox (vehicle_dr at 7f0fba1, 2 seeds, median 60 s window end error):
+  * smooth-road cruise route at 9 m/s (vib_base 0.05, vib_per_ms 0.02): **788-799 m** with the current detector (flagged stationary at 9 m/s for 160-400 s) vs **29-39 m** with the `quiet_enter_n` override disabled;
+  * BUT on `long_route` with default vibration, disabling the override is WORSE (147-157 -> 163-165 m): the override catches real stops;
+  * a braking-evidence gate on the override fixed the cruise case (39 m) and kept `long_route` (147-157 m), but did NOT fix `long_route` on a smooth road (221-251 m): braking before turns looks like braking to a stop, and false entries cascade through the `v_est < v_gate` branch.
+* Conclusion: the stationarity detector is the next target (before I2), decided on REAL data with VBOX used only for scoring.
+* Plan for this block (from the user's message): **S0** detector audit (no filter change) -> **S1** detector fixes S1a-S1e, one at a time, each behind a flag (default OFF until adopted), sandbox suite (i)-(iv) with criteria fixed before running,
+  then STOP and show one compact table. After that (only on "go"): I2a / I2b, I1a, a D-design proposal (OSM road matching; proposal only), I3 / I1b later. The full text of the S1 specification is kept in the S1 section below when it starts.
+
+# PLAN UPDATE: STATIONARITY S0 -> S1 (verbatim copy of the user's message, 2026-09-27; the header paragraphs are logged above)
+```text
+STEP S0 — Detector audit (no filter change). Add a stationarity audit to check_outage.py (VBOX = scoring only), for S3b, S2 (and S1 secondary), whole drive, with the current default:
+- false-standstill seconds (flagged AND VBOX speed > 0.5 m/s), number of episodes, max and median VBOX speed while flagged;
+- for each false episode: which entry branch fired (v_est < v_gate, or the quiet_enter_n override), and its duration;
+- true-stop recall: fraction of VBOX-stopped time (speed < 0.2 m/s) that is flagged;
+- damage estimate: distance lost = ∫ VBOX speed over false-standstill time; turning lost = ∫ |VBOX yaw rate| over the same time;
+- the same audit restricted to the S3b and S2 dev windows' outage spans.
+Log it, commit, push. Continue to S1 (no stop needed) unless false-standstill time is < 1 % of moving time on both drives; in that case stop and tell me.
+
+STEP S1 — Detector fixes. One at a time, each behind a flag (default OFF until adopted), each with a sandbox test first. Sandbox suite for EVERY S-variant, criteria fixed before running:
+  (i) smooth-cruise route below: false-standstill time < 5 s and median window end error < 60 m;
+  (ii) long_route default vibration: median window end error no worse than current by > 3 %;
+  (iii) long_route with vib_base 0.05, vib_per_ms 0.02: report the result (it's the hard case; improvement wanted, not required);
+  (iv) a real 20 s stop is still detected (recall >= 0.8 of the current recall).
+  Smooth-cruise route for sim_drive: [("straight",300,9,9),("turn",40,400,9),("straight",400,9,9),("turn",-60,500,9),("straight",300,9,0),("stop",20),("straight",300,9,9),("turn",45,450,9),("straight",500,9,9),("turn",-50,400,9),("straight",400,9,9)] with vib_base 0.05, vib_per_ms 0.02 (also run vib_base 0.03, vib_per_ms 0.01).
+
+ S1a Braking evidence for the quiet override (mount-free, causal): 1 s mean of ax and ay; subtract a causal 20 s running median of each (removes the accel bias); excess = the norm of that vector, counted only when |1 s mean omega_vert| < 0.1 rad/s (not in a turn) and excess > 0.3 m/s^2; dv_brake = sum excess*dt over the last 15 s. The override may enter standstill only if dv_brake >= 0.6 x (max filter speed over the last 15 s). (The prototype of exactly this passed (i), (ii), (iv) and failed (iii).)
+ S1b Self-calibrating rest level: learn the IMU rest signature (acc_var, and std of omega_vert over 1 s) ONLY from standstills confirmed by a new GNSS fix with speed < 0.3 m/s; after >= 2 confirmed stops, entry needs acc_var < k x learned rest acc_var AND omega std < k x learned rest omega std (grid k in {1.5, 2, 3}); until then keep the fixed thresholds.
+ S1c Anti-cascade: when a new GNSS fix says speed > 2 m/s during or within 2 s after a standstill (GNSS-contradicted stop), block standstill entry via the v_est < v_gate branch for 20 s unless S1a braking evidence is present. Log each contradiction.
+ S1d Retroactive replay (causal): on a GNSS-contradicted standstill, rewind to the standstill entry (ring buffer of IMU rows and filter state, <= 30 s), re-run that span with standstill entry disabled, then apply the fix. Only uses data up to now; the displayed past may change (state that in the docs). Naturally inactive inside outages.
+ S1e A stopped car does not rotate: exit standstill when |mean omega_vert - b_g| over 1 s exceeds w_exit; grid w_exit in {0.10 (current), 0.05, 0.03} rad/s.
+Try the promising combinations too (e.g. S1a+S1c, S1a+S1b+S1c). Keep changes by the noise rule on the dev windows (S3b and S2), AND require: false-standstill seconds down >= 50 % on both drives, with true-stop recall >= 0.8 x the current.
+
+Stop after S1 and show one compact table: rows = current, each S1 variant, the best combination; columns = S3b dev windows med end / p90 / med cross / med along | S2 dev windows same | S3b mini mean | launch-from-stop med end (n) | false-standstill s S3b / S2 | true-stop recall S3b / S2 | event mean / end / path ratio (report only) | 1-sigma coverage | verdict. Include the hold-last-fix row.
+
+AFTER S1 (only when I say "go"):
+ I2a OU speed prior + I2b turn ceiling (as specified in the saved plan), tuned on the dev windows, reporting the launch-from-stop windows separately.
+ I1a GNSS latency (B0 already measured ~0.5 s; estimate it on the dev windows).
+ D-design (proposal only, no code): OpenStreetMap road-matching for vehicle_dr — data source and caching (OSM for the S3b/S2 areas, stored in the repo with ODbL attribution), measurement model (road-snap position and road-direction heading as gated pseudo-measurements, sigma from the road width + OSM error), ambiguity at junctions, and how it is scored honestly. Stop for approval.
+ I3 vibration speed, I1b robustness: later.
+
+Commit per step, push after every commit, update the handoff section before stopping.
+```
+
+
+# S0 — stationarity audit (2026-09-27; NO filter change — `vehicle_dr` output is bit-identical to 7f0fba1, checked on S3b with / without the outage and on the sandbox)
+**What was added.** `vehicle_dr.run_pipeline` now returns `result["standstill_log"]` (diagnostics only, never read by the filter): one dict per standstill episode with `t_enter`, `v_est`, `quiet_run`, `acc_var`, `w_dev`, the entry branch
+(`via_v_gate` = the speed estimate was already < `v_gate`; `via_override` = 3 s of sustained quiet, `quiet_enter_n`), `gap_prev` (s since the previous episode ended) and `t_exit` + `exit` reason (`acc_var` / `omega` / `release` / `gnss` = a new fix said moving / `end` = run ended while stationary).
+`check_outage.py`: `Truth` got `yaw_rate()` (VBOX yaw-rate column, scoring only) and `covers()` (rows past the end of the reference file are never scored); `stationarity_audit()`, `audit_report()`, `audit_windows_report()`, `audit_main()`; `window_benchmark(..., audit=True)`;
+CLI `python backend/check_outage.py S3b --audit [--audit-windows] [--workers 4] [--top N] [--set key=value]` (`--audit-windows` = S3b tuning windows, other drives all registered windows in a worker pool). `sim_drive.py`: `smooth_cruise_route()` (the S1 sandbox route (i)) and a truth column `yaw_rate_degs` (true yaw rate, scoring only). `tests/test_stationarity.py`: 18 tests (hand-computed synthetic case, span / coverage handling, log == flag, sandbox smooth-cruise failure reproduced, S3b pin); suite 284 pass / 37 skip.
+**Definitions (fixed before the numbers were looked at).** false standstill = flag set AND VBOX speed > 0.5 m/s; VBOX-stopped = speed < 0.2 m/s; true-stop recall = flagged time / VBOX-stopped time; distance lost = integral of VBOX speed over the false time; turning lost = integral of |VBOX yaw rate| over it;
+false episode = a flagged episode holding >= 1 s of false time; kind = "false entry" (flag set while VBOX moving) or "late release" (flag set at rest, the car drove off while it stayed set); branch "v_gate" whenever `v_est < v_gate` (also when the override would have fired too — none of the false episodes had both true). Rows are weighted by their real time step. Added, unrequested, small: the MIRROR-IMAGE damage
+= VBOX-stopped time that is NOT flagged, and the integral of the filter's own speed over it ("phantom driving": the filter keeps its held speed while the car is parked).
+Whole-drive rows = the current default (H1c) with NO outage (GNSS available). Outage-span rows = each dev window's 60 s span from its own truncated run with GNSS hidden (windows overlap, so read sums as fractions).
+
+**Whole drive**
+| | S3b (dev) | S2 (dev) | S1 (secondary) |
+|---|---|---|---|
+| time scored / VBOX moving / VBOX stopped (s) | 680 / 618 / 53 | 9380 / 8130 / 1125 | 5174 / 4602 / 505 |
+| flagged s (episodes) | 47.1 (13) | 1172.4 (111) | 482.5 (62) |
+| **FALSE-standstill s (% of moving time)** | **12.1 (1.96 %)** | **148.2 (1.82 %)** | 64.1 (1.39 %) |
+| ... as % of flagged time | 25.7 % | 12.6 % | 13.3 % |
+| false episodes (>= 1 s) of all | 5 of 13 | 39 of 111 | 22 of 62 |
+| VBOX speed while falsely flagged: median / max (m/s) | 1.11 / 8.93 | 1.32 / 3.34 | 1.06 / 4.62 |
+| false episodes by entry branch: v_gate / override | 4 / 1 | 28 / 11 | 15 / 7 |
+| false episodes by kind: false entry / late release | 3 / 2 | 26 / 13 | 12 / 10 |
+| **true-stop recall** | **59.6 %** | **85.8 %** | 76.8 % |
+| distance lost (% of the distance driven) | 27.8 m (0.74 %) | 197 m (0.26 %) | 81 m (0.21 %) |
+| turning lost (% of the turning) | 32 deg (0.85 %) | 138 deg (0.39 %) | 168 deg (0.83 %) |
+| mirror: missed-stop s / phantom driving | 21.5 s / 81.5 m | 159.4 s / 590.5 m | 117.3 s / 465.3 m |
+| false "false entry" episodes whose filter speed was already wrong (v_est < 0.3 m/s, or > 1 m/s below VBOX) | 2 of 2 | 9 of 17 | 2 of 9 |
+| false entries within 10 s of the previous episode ending (cascade) | 1 of 3 | 11 of 26 | 3 of 12 |
+
+**Outage spans of the dev windows (GNSS hidden) — and, as a control, the SAME spans cut out of the whole-drive run (GNSS available)**
+| | S3b: 11 tuning windows | S2: 861 windows |
+|---|---|---|
+| false s (% of moving time in the spans) | 5 s (0.91 %) — only sub-second edges of true stops | 686 s (1.49 %) |
+| windows with >= 1 s / >= 5 s / >= 20 s of false time; max | 0 / 0 / 0 %; max 0.8 s | 15 / 3 / 1 %; max 46.2 s |
+| distinct false episodes; by branch v_gate / override | 0 | 60; 40 / 20 (54 entered inside a span) |
+| distance lost / turning lost (% of driven / turned) | 0.11 % / 0.99 % | 0.24 % / 0.25 % |
+| true-stop recall: GNSS hidden / GNSS available (control) | **32.0 % / 69.8 %** | 76.5 % / 81.8 % |
+| phantom driving (missed stops): GNSS hidden | 53 s, 342 m = **8.63 %** of the driven distance | 1156 s, 7169 m = **1.66 %** |
+| phantom driving: GNSS available (control) | 24 s, 202 m = 5.10 % | 891 s, 3334 m = 0.77 % |
+
+**The five false episodes of S3b (whole drive):** 208.6-214.2 s (late release, 2.8 s false, VBOX 1.1 / max 1.5 m/s, left by `omega`); 415.9-418.3 s (false entry via the OVERRIDE, 2.4 s, ~2.5 m/s); 262.5-265.2 s (false entry, 2.4 s, 0.5-1.3 m/s, v_est 0.02); 269.8-270.6 s (false entry, 0.8 s, 6.9-7.1 m/s, v_est 0.00); 276.2-277.6 s (false entry, 1.4 s, 8.9 m/s, v_est 0.00); 604.1-605.5 s (late release, 1.1 s).
+**Correction to the H1 diagnostic 3 note.** "One episode 269.8-277.6 s flagged stationary while VBOX shows 7-8.9 m/s" was two separate flicker episodes (269.8-270.6 s at 6.9-7.1 m/s and 276.2-277.6 s at 8.9 m/s), not one 7.8 s freeze. Both entered via `v_est < v_gate` with `v_est` already near 0: the previous false episode's ZUPT had pinned the filter speed to ~0 and only the next GNSS speed fix (9 s cadence) repairs it,
+so on S3b the `v_est < v_gate` test is not independent of the detector's own earlier mistakes — a small instance of the cascade the external sandbox study describes. The worst single false episode on the real drives is on S2: a 26.8 s freeze at 1.5-2.2 m/s (3705.3-3732.1 s, entered via the override 0.1 s after another episode ended, left by `acc_var`); one S2 window loses 46.2 s of its 60 s span to false standstill.
+
+**Reading (facts first, then cautious interpretation).**
+1. Decision rule: false-standstill time is 1.96 % (S3b) and 1.82 % (S2) of moving time, S1 1.39 % — all above 1 %, so the plan continues to S1 without stopping.
+2. On REAL data the false standstills are mostly short and slow (median VBOX speed 1.1-1.3 m/s: creeping / launches / junction crawl; episodes of 1-9 s) and cost well under 1 % of the driven distance and of the turning. The sandbox failure the external study found (hundreds of seconds at 9 m/s) is a harder regime than any of these three real drives contain — the worst real single freeze is 1.4 s at 8.9 m/s.
+3. The S3b DEV WINDOWS contain no false episode of >= 1 s (0 % of windows; the 0.91 % of moving time is sub-second edges of real stops), so a false-standstill fix cannot move the S3b dev-window medians; S2 has 15 % of windows with >= 1 s and 3 % with >= 5 s, so an S2 effect, if any, would show mainly on the tail (p90), not necessarily the median.
+4. The MIRROR failure (missed stops) is bigger on real data than the false-standstill one: stopped-but-not-flagged time is 41 % of VBOX-stopped time on S3b (23 % on S2, 23 % on S1), and the filter keeps "driving" through it (whole-drive phantom distance 81 m S3b, 590 m S2, 465 m S1 — 3-7x the false-standstill distance lost). It gets WORSE with GNSS hidden: S3b recall drops 70 % -> 32 % and phantom driving rises 5.1 % -> 8.6 % of the driven distance in the outage spans; S2 0.77 % -> 1.66 %.
+   Mechanism, consistent with the numbers: with GNSS hidden nothing pulls `v_est` under `v_gate` (2 m/s), so the `v_est < v_gate` branch is starved and only the 3 s quiet override can flag a stop — and on the whole-drive S3b run every one of the 9 stops that began at rest was caught through `v_gate`, none through the override alone (S2: 25 of 70 through the override alone). None of the plan's S1 variants directly targets missed stops inside an outage; S1a (braking evidence) makes entry HARDER, which could shrink recall further — the recall criterion (>= 0.8 x current) is the one to watch when S1a is tried.
+   A candidate NOT in the plan, to raise at the S1 stop rather than build now: let a stop enter even while `v_est` is still high, on quiet evidence alone (the override, without S1a's extra restriction), and reset `v_est` to 0 at entry the way the launch-release code already resets it on exit.
+5. The false-entry cascade (an episode starting within 10 s of the previous one ending, with the filter's own speed already wrong) is common on S2 (11 of 26 false entries; 9 of the 17 `v_gate` entries had `v_est` already off by > 1 m/s or pinned near 0) but rare on S3b (1 of 3) and S1 (3 of 12) — S1c (anti-cascade) has more to work with on S2 than on S3b.
