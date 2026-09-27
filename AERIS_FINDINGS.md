@@ -56,24 +56,32 @@ Diagnostic one-off scripts lived in a session scratchpad and are gone; everythin
 **ON (default):** causal GNSS on NEW fixes only (position sigma = max(gps_accuracy_m, 3 m); speed; course when speed > 3 m/s), chi-square 99 % gate on every GNSS update
 (3 consecutive position rejections -> next fix accepted ungated, logged `pos_forced`; **course and speed have no failsafe**), IMU-only standstill -> ZUPT + ZARU, psi frozen while stationary,
 GNSS update order speed -> course -> position, honest propagation of data holes (dt > 1 s), B3b launch calibration with turn compensation and **replay only** (`aided_max_s = 0`).
+**R1 (2026-09-27): `use_brake_gate` (S1a), `use_self_cal` (S1b, `self_cal_k` 2.0), `use_anticascade` (S1c) and `use_replay` (S1d) are all now ON by default (= "ALL"); `w_exit` 0.05 (S1e, was 0.10).**
+S1 adopted despite NOT clearing its own real-data bar (false-standstill seconds down >= 50 % on both drives — S3b only reached -35.5 %) because that bar was mis-specified (S3b's dev windows contain
+no false episode >= 1 s to move) and ALL is accuracy-neutral-to-positive on the dev windows by the noise rule, removes the sandbox catastrophe (smooth-cruise false-standstill 777-787 m -> 28-40 m) and
+cuts real false-standstill time -35.5 % (S3b) / -59.5 % (S2). See "R1 — adopt ALL as the default" below.
 
 **OFF (default False; code + sandbox tests kept):** `use_centripetal` (B3c, failed on S3b), `use_fixed_mount` (B3d, no benefit on S1), **`use_gyro_scale` (H1a) and `use_gyro_state` (H1b): correct on the sandbox, no benefit on real data because the real gyro scale is ~1.0**. Accel-integrated speed (`aided_max_s > 0`) is off because it hurt on S3b.
 H1 knobs: `gs_window_s` 300, `gs_min_pairs` 5, `gs_k_min/max` 0.7 / 1.4, `gs_min_speed` 3, `gs_min_dcourse_deg` 20, `gs_max_pair_s` 15, `gs_max_x_rad` 2.8, `gs_latency_s` 0, `gs_fit` theilsen, `gs_gate_on` course, `gs_deadband` 0; `p0_sg` 0.10, `rw_sg` 1e-4.
-New result keys: `gyro_scale_k / _log / _pairs` (H1a), `gyro_state_log` (H1b), `gyro_bias` (b_g per row, diagnostics).
+New result keys: `gyro_scale_k / _log / _pairs` (H1a), `gyro_state_log` (H1b), `gyro_bias` (b_g per row, diagnostics), `standstill_log` (S0), `replay_log` (S1d).
 
 | group | defaults |
 |---|---|
 | process noise | sigma_gyro 0.010 rad/s, turn_noise 0.50, rw_v 2.00 m/s/sqrt(s), rw_bg 1e-4, rw_ba 1e-3, rw_pos 0.10, rw_v_aided 1.0 |
 | GNSS | gnss_min_sigma 3.0 m, sigma_gnss_speed 0.3 m/s, sigma_gnss_course_deg 6.0, min_course_speed 3.0 m/s, min_satellites 6, gate_enabled True, max_consecutive_pos_rejects 3 |
-| standstill | win 10 samples, acc_var_enter 0.10 / exit 0.30, w_enter 0.05 / exit 0.10 rad/s, v_gate 2.0 m/s, launch_sigma_v 1.5, gnss_moving_speed 2.0, sigma_zupt 0.05, **sigma_zaru 0.10 (H1c; was 0.01)** |
+| standstill | win 10 samples, acc_var_enter 0.10 / exit 0.30, w_enter 0.05 / **exit 0.05 (S1e/R1; was 0.10)** rad/s, v_gate 2.0 m/s, launch_sigma_v 1.5, gnss_moving_speed 2.0, sigma_zupt 0.05, sigma_zaru 0.10 (H1c) |
 | launch (ON) | use_launch True, n_before 8, n_after 20, min_rest 10, R_min 0.8, min_accel 0.4 m/s^2, turn_comp True, w_max_comp 0.8, comp_max 1.0, release_mean_thr 0.6 (x3 samples), quiet_enter_n 30, sigma_v_after 0.6, sigma_ba 0.2, aided_w_max 0.10, aided_max_s 0.0 |
+| S1a brake gate (**ON, R1**) | use_brake_gate True, brake_w_max 0.10, brake_thresh 0.30, brake_median_s 20, brake_window_s 15, brake_frac 0.60 |
+| S1b self-cal (**ON, R1**) | use_self_cal True, self_cal_k 2.0, self_cal_confirm_speed 0.3, self_cal_min_confirm 2 |
+| S1c anti-cascade (**ON, R1**) | use_anticascade True, anticascade_block_s 20, anticascade_speed 2.0, anticascade_lookback_s 2.0 |
+| S1d replay (**ON, R1**) | use_replay True, replay_buffer_s 30 |
 | centripetal (OFF) | use_centripetal False, cent_w_min 0.15, cent_steady 0.10, cent_every 5, cent_v_min 1.0, sigma_cent 1.0 (untuned default; best S3b grid point was 4.0 = nearly off), cent_res 0.6, cent_bg_coupling False |
 | fixed mount (OFF) | use_fixed_mount False, mount_cal_t 200 s, gate: both criteria corr > 0.8 and within 30 deg, sigma_lat 0.8, sigma_ba_rest 0.15 |
 | initial P (std) | pos 5 m, psi pi, v 5 m/s, b_g 0.02, b_a 0.3; psi_init_sigma 6 deg |
 
-Sanity check that the state is as documented (CURRENT DEFAULT, after H1c): `PYTHONUTF8=1 python backend/check_outage.py S3b --filter vehicle_dr` must give mini-outages **21.72 / 16.33 / 63.92** (n = 20, coverage 55 %), outage mean **68.60 m**, end **158.96 m**,
-event along / cross at the end -100.34 / +123.29 m, path ratio 0.46, mean speed error 2.65 m/s. (Old default, sigma_zaru = 0.01: 21.93 / 17.11 / 64.85, coverage 50 %, outage 64.35 / 145.89, along / cross -85.58 / +118.15 — reproduced 2026-09-26 before E0, after E0 and after the H1 code changes with the flags off;
-`python backend/dev_eval.py --set sigma_zaru=0.01` reproduces the old dev-window baseline.) Dev-window reference for the current default: `python backend/dev_eval.py --workers 4` -> S3b 126.0 / 211.6 / 103.4 / 73.1, S2 (861) 130.6 / 377.1 / 53.8 / 86.1, pooled 130.6, ~5 min.
+Sanity check that the state is as documented (CURRENT DEFAULT, after R1): `PYTHONUTF8=1 python backend/check_outage.py S3b --filter vehicle_dr` must give mini-outages **21.31 / 16.09 / 63.95** (n = 20, coverage 55 %), outage mean **66.77 m**, end **175.95 m**,
+event along / cross at the end -126.10 / +122.71 m, path ratio 0.46, mean speed error 2.44 m/s. (Pre-R1 default, all S1 flags off / w_exit 0.10: mini 21.72 / 16.33 / 63.92, coverage 55 %, outage 68.60 / 158.96, along / cross -100.34 / +123.29 — the H1c row;
+`python backend/dev_eval.py --set use_brake_gate=false --set use_self_cal=false --set use_anticascade=false --set use_replay=false --set w_exit=0.10` reproduces the pre-R1 dev-window baseline.) Dev-window reference for the current default: `python backend/dev_eval.py --workers 4` -> S3b 120.9 / 211.6 / 69.8 / 60.8, S2 (861) 126.4 / 381.6 / 54.6 / 84.8, pooled 126.1, ~14 min (reproduced exactly 2026-09-27, see "R1" below).
 Runtime: one full vehicle_dr run of S3b = 0.10 s (15 us/row); a full S2 window evaluation = ~5 min with 4 low-priority workers (~90 s for the stride-4 screening subset).
 
 ## Latest results table (S3b unless stated; mini = mean / median / max in m over the 20 intervals ending <= 200 s)
@@ -87,7 +95,7 @@ Runtime: one full vehicle_dr run of S3b = 0.10 s (15 us/row); a full S2 window e
 | B3b as specified (strict omega < 0.05) | 22.46 / 17.32 / 65.23 | – | – | – | – | – | n/a | fail: no S3b launch accepted |
 | B3b turn-comp + accel integrated to next stop | 33.89 / 26.69 / 100.45 | – | – | – | – | 40 % | n/a | worse, reverted |
 | B3b replay only (old default until H1c) | 21.93 / 17.11 / 64.85 | 22.12 | 64.35 / 145.89 | 75.5 | 104.9 | 50 % | 43.89 | pass, marginal (-0.53 m; 2 launches in the tuning window) |
-| **H1c sigma_zaru 0.10 (CURRENT DEFAULT)** | **21.72 / 16.33 / 63.92** | – | 68.60 / 158.96 | 69.9 | 104.5 | 55 % | **16.77** (tail gone) | adopted: dev windows -22 % (S3b) / -14 % (S2); event +6.6 % / +9 % (report only) |
+| **H1c sigma_zaru 0.10 (superseded by R1, 2026-09-27 — see PLAN RESULTS TABLE v2)** | **21.72 / 16.33 / 63.92** | – | 68.60 / 158.96 | 69.9 | 104.5 | 55 % | **16.77** (tail gone) | adopted: dev windows -22 % (S3b) / -14 % (S2); event +6.6 % / +9 % (report only) |
 | B3c centripetal speed (best S3b grid point) | 22.12 / 17.64 / 62.28 | 23.75 | 72.22 / 163.16 | 115.9 | 159.5 | 45 % | n/a | fail, OFF |
 | B3d fixed-mount aiding (S3b gate inactive; S1 active, phi -65.5 deg) | = B3b | 22.12 | 64.35 / 145.89 | 75.5 | 104.9 | 50 % | off 43.89 / on 52.66 | no benefit, OFF |
 
@@ -112,14 +120,18 @@ Noise rule: windows overlap; < 5 % on the median end error = no change; keep a c
 | turn_noise 0.3 / 0.15 / 0.05 (screen) | 164.3 / 166.4 / 154.4 (end) | 148.6 / 150.4 / 151.9 (end) | 22.23 / 22.79 / 23.22 | 182.9 / 182.6 / 182.5 (37) | 65.72 / 67.97 / 67.71 (mean) | S2 29 / 24 / 24 % | no change; coverage collapses: keep 0.5 |
 | probe: b_g frozen at 0 (screen) | 126.3 / 208.8 / 94.9 / 73.1 | 183.5 / 444.6 / 92.3 / 100.1 | 21.48 | 206.1 (36) | 67.78 / 156.77 / 0.46 | 55 / 55 / 23 % | helps S3b, hurts S2 +22 %: rejected |
 | probe: tight prior + rw_bg 1e-5 (screen) | 126.2 / 208.8 / 95.6 / 73.0 | 122.4 / 385.5 / 58.5 / 77.2 | 21.49 | 187.2 (36) | 67.62 / 156.30 / 0.46 | 55 / 55 / 56 % | helps both; superseded by H1c |
-| **H1c sigma_zaru 0.10 (FULL S2 list) — CURRENT DEFAULT** | **126.0 / 211.6 / 103.4 / 73.1** | **130.6 / 377.1 / 53.8 / 86.1** | **21.72** | **147.9 (138)** | 68.60 / 158.96 / 0.46 | 55 / 50 / 62 % | **adopted** (S3b -22 %, S2 -14 %; S1 tail gone) |
-| I1a GNSS latency | | | | | | | pending |
-| I1b robustness (course failsafe / reset / Huber) | | | | | | | pending |
+| H1c sigma_zaru 0.10 (FULL S2 list) | 126.0 / 211.6 / 103.4 / 73.1 | 130.6 / 377.1 / 53.8 / 86.1 | 21.72 | 147.9 (138) | 68.60 / 158.96 / 0.46 | 55 / 50 / 62 % | adopted (S3b -22 %, S2 -14 %; S1 tail gone) |
+| S1e w_exit 0.05 alone (S2 screen) | 120.9 / 211.6 / 69.8 / 60.8 | 113.8 / 377.2 / 51.6 / 75.6 (screen) | 21.31 | 193.5 (35, screen) | 66.77 / 175.95 / 0.46 | 55 / 56 / 59 % | real S3b gain, S2 neutral; alone fails the 50 %-false-standstill bar |
+| ALL = S1a+S1b+S1c+S1d+S1e (FULL S2 list) | 120.9 / 211.6 / 69.8 / 60.8 | 126.4 / 381.6 / 54.6 / 84.8 | 21.31 | 133.7 (104) | 66.77 / 175.95 / 0.46 | 55 / 56 / 69 % | best S1 combo; noise-rule neutral/positive; fails the 50 %-false-standstill bar on S3b alone |
+| **R1: ALL adopted as the default (2026-09-27)** | **120.9 / 211.6 / 69.8 / 60.8** | **126.4 / 381.6 / 54.6 / 84.8** | **21.31** | **133.7 (104)** | 66.77 / 175.95 / 0.46 | 55 / 56 / 69 % | **adopted — CURRENT DEFAULT**: S3b end -4 % / cross -33 %; S2 end -3 % / p90 +1 % (noise-rule neutral-to-positive); removes the sandbox catastrophe; false-standstill -35.5 % (S3b) / -59.5 % (S2) |
+| I1a GNSS latency | | | | | | | deferred 2026-09-27 (B0 estimate ~0.5 s ~ 4 m, negligible against 100+ m errors) |
+| I1b robustness (course failsafe / reset / Huber) | | | | | | | deferred 2026-09-27 (the hard lock-out was already removed by H1c) |
 | I2a OU speed prior | | | | | | | pending |
 | I2b turn speed ceiling | | | | | | | pending |
-| I3 vibration speed (alone, and with I2a) | | | | | | | pending |
+| M1 outage-span recall / phantom driving | | | | | | | pending |
+| I3 vibration speed (alone, and with I2a) | | | | | | | deferred unless I2 falls short |
 | best combination | | | | | | | pending |
-The target is to beat hold's end error clearly: S3b now 126.0 vs 156.5 m (-19 %; p90 211.6 vs 299.6, -29 %), S2 130.6 vs 368.6 m (-65 %).
+The target is to beat hold's end error clearly: S3b now 120.9 vs 156.5 m (-23 %; p90 211.6 vs 299.6, -29 %), S2 126.4 vs 368.6 m (-66 %).
 Old E0-format table (S3b only, superseded — kept for history):
 Tuning windows = the 11 S3b 60 s outages starting 30-130 s (end < 200 s). Along / cross = MEDIAN over windows of |along| / |cross| at the end of the window (m). Event = the 200-260 s outage (reported, never tuned).
 Coverage = truth inside the reported 1-sigma ellipse: mini-outage intervals / windows (median over windows of the per-epoch fraction).
@@ -1179,3 +1191,76 @@ All five mechanisms, their unit tests (18) and the sandbox-suite pins (8) are ke
 | S1e (w_exit 0.05) | **120.9/211.6/69.8/60.8** | 113.8/377.2/51.6/75.6 (screen) | 21.31 | 193.5 (35, screen) | 10.0 (-17.4%) / 134.9 (-9.0%) | 59.6% / 86.0% | 66.77/175.95/0.46 | 55/56/59% | real S3b accuracy gain, S2 neutral; < 50% bar |
 | **ALL (best combination)** | **120.9/211.6/69.8/60.8** | 126.4/381.6/54.6/84.8 | 21.31 | 133.7 (104) | **7.8 (-35.5%)** / **60.0 (-59.5%)** | 59.6% / 83.8% | 66.77/175.95/0.46 | 55/56/69% | **best tried; still fails the 50%-on-S3b bar -> NOT adopted** |
 "S2 dev" for S1a-S1e = the stride-4 screening subset (n=216; labelled "screen"); current, ALL and S1a+S1c+S1d (in prose) are confirmed on the full 861-window list. false-standstill s / recall are whole-drive `stationarity_audit` (no outage), the primary real measure.
+
+# External sandbox study 3 — S1 review + OU speed prior (2026-09-27)
+- S1 review: the acceptance rule ("false-standstill s down >= 50 % on BOTH drives") was mis-specified — S3b's dev windows contain zero false episodes >= 1 s, so no fix could move S3b by 50 %. ALL (S1a+S1b+S1c+S1d+S1e w_exit 0.05) is accuracy-neutral by the noise rule (S3b med end -4 %, cross -32 %; S2 full list -3 %, p90 +1 %), removes the sandbox catastrophe (smooth cruise 777-787 m -> 28-40 m) and cuts false standstill -35 % (S3b) / -60 % (S2). Decision: adopt ALL as the default. This is a rule revision stated openly before any further tuning; S3c stays the sealed judge.
+- OU speed prior, external prototype on vehicle_dr @ 78a4160 (sandbox, 2 seeds, median 60 s window end error, OFF -> tau 10 / 20 / 40 with W 120): long_route 157/146 -> 50/46, 82/84, 113/110; event-like window (stop, then outage 200-260 s) end 173 -> 36-38 m, path ratio 0.43 -> 0.86; stop-and-go route 221/223 -> 126/115 (tau 10), 159/161 (tau 20); multi_stop_route 130/123 -> 125/115 (tau 10) but 151/143 (tau 20, WORSE). OU + ALL ~= OU alone. Brake-gated faster stop entry (quiet_enter_n 15): mixed. Caveat: sandbox speeds are regular; real gains will be smaller; missed stops inside outages become phantom driving under OU.
+- Priority decision: I1a (latency ~0.5 s ~ 4 m) and I1b (the lock-out was already removed by H1c) are negligible against 100+ m errors -> DEFERRED. I3 deferred unless I2 falls short. New order: R1 -> I2 -> C -> D-design.
+
+# PLAN UPDATE: R1 -> I2 -> C -> D-design (verbatim copy of the user's message, 2026-09-27)
+```text
+Read CLAUDE.md and AERIS_FINDINGS.md fully first. Registry v2, the noise rule and all standing rules apply. Sonnet, high effort. Push after every commit.
+
+FIRST, log this verbatim under "External sandbox study 3 — S1 review + OU speed prior (2026-09-27)" in AERIS_FINDINGS.md:
+- S1 review: the acceptance rule ("false-standstill s down >= 50 % on BOTH drives") was mis-specified — S3b's dev windows contain zero false episodes >= 1 s, so no fix could move S3b by 50 %. ALL (S1a+S1b+S1c+S1d+S1e w_exit 0.05) is accuracy-neutral by the noise rule (S3b med end -4 %, cross -32 %; S2 full list -3 %, p90 +1 %), removes the sandbox catastrophe (smooth cruise 777-787 m -> 28-40 m) and cuts false standstill -35 % (S3b) / -60 % (S2). Decision: adopt ALL as the default. This is a rule revision stated openly before any further tuning; S3c stays the sealed judge.
+- OU speed prior, external prototype on vehicle_dr @ 78a4160 (sandbox, 2 seeds, median 60 s window end error, OFF -> tau 10 / 20 / 40 with W 120): long_route 157/146 -> 50/46, 82/84, 113/110; event-like window (stop, then outage 200-260 s) end 173 -> 36-38 m, path ratio 0.43 -> 0.86; stop-and-go route 221/223 -> 126/115 (tau 10), 159/161 (tau 20); multi_stop_route 130/123 -> 125/115 (tau 10) but 151/143 (tau 20, WORSE). OU + ALL ~= OU alone. Brake-gated faster stop entry (quiet_enter_n 15): mixed. Caveat: sandbox speeds are regular; real gains will be smaller; missed stops inside outages become phantom driving under OU.
+- Priority decision: I1a (latency ~0.5 s ~ 4 m) and I1b (the lock-out was already removed by H1c) are negligible against 100+ m errors -> DEFERRED. I3 deferred unless I2 falls short. New order: R1 -> I2 -> C -> D-design.
+
+═════ R1 — adopt ALL as the default ═════
+Set the defaults: use_brake_gate, use_self_cal, use_anticascade, use_replay = True; w_exit = 0.05. Verify that the new default reproduces the ALL row exactly (S3b dev 120.9/211.6/69.8/60.8, S2 full list 126.4/381.6/54.6/84.8, S3b mini 21.31, event 66.77/175.95/0.46). Update the tests that pin old defaults (keep the flags-off regression tests using explicit params). Full suite green. Update "Latest results" and the results table. Commit + push.
+
+═════ I2a — OU speed prior (the main step) ═════
+Implement exactly this in vehicle_dr (flag use_ou, default OFF until adopted):
+- History: every NEW usable GNSS fix with speed > 2 m/s appends (t, speed). Before each predict: vbar = median, sv = max(std, 1.0) over the fixes with t_now − t ≤ ou_window_s; if fewer than 3, OU is inactive (speed held as now).
+- In predict, only when NOT stationary and NOT accel-aided: a = exp(−dt/ou_tau); v ← vbar + (v − vbar)·a; F[3,3] = a; the speed process noise is sv²·(1 − a²) (replaces rw_v² dt). ZUPT / standstill still override (v = 0 when stationary). It runs between fixes too, not only in outages (causal).
+- Label in code and docs: "speed prior from recent driving", not a measurement.
+Sandbox first (criteria fixed now, 2 seeds, use_ou with tau 10, W 120, vs OFF):
+  (a) long_route: median window end ≤ 0.5 × OFF;
+  (b) the event-like window (start 200 s on default_route / long_route): path ratio ≥ 0.75;
+  (c) a stop-and-go route, add to sim_drive as stop_and_go_route():
+      [("straight",150,6,0),("stop",15),("straight",300,14,4),("turn",90,12,4),("straight",120,5,0),("stop",25),("straight",400,13,4),("turn",-90,12,4),("straight",200,7,0),("stop",10),("straight",250,12,4),("turn",90,12,4),("straight",150,6,0),("stop",30),("straight",500,14,4),("turn",-90,12,4),("straight",180,8,0),("stop",12),("straight",300,11,4),("turn",90,12,4),("straight",300,12,0)]
+      median end ≤ 0.7 × OFF;
+  (d) multi_stop_route: no worse than OFF by > 5 %.
+Real data: screen the grid ou_tau ∈ {5, 10, 20, 40} × ou_window_s ∈ {60, 120, 300} on the S3b dev windows + the S2 stride-4 subset, then confirm the top 2 on the full S2 list.
+SELECTION RULE (fixed now, before any real number): among the settings that do NOT worsen p90 end on either drive by > 5 % and keep the 1σ window coverage within 30–70 % on both drives, pick the lowest pooled median end error; ties within 5 % → the larger tau (more conservative). Adopt only if it beats the current default by > 5 % on the pooled median end (the noise rule).
+Report for each row: S3b dev med end / p90 / cross / along | S2 same | S3b mini mean | launch-from-stop med end (n) | median path ratio (S3b / S2) | outage-span phantom driving (% of driven distance) and outage-span true-stop recall (S3b / S2) | event mean / end / path ratio (report only) | 1σ mini / S3b / S2.
+
+═════ I2b — turn speed ceiling ═════
+As in the saved plan (an inequality only, never pushes v up), tested on top of the I2a winner. Keep only by the noise rule.
+
+═════ M1 — stops missed inside outages (report first, adopt only if clearly better) ═════
+With the I2 winner as the default: measure the outage-span recall and phantom driving. Then try a brake-evidenced faster entry: quiet_enter_n ∈ {15, 20} (brake gate stays on, so entry still needs braking evidence). Adopt only if the outage-span phantom driving drops ≥ 25 % on both drives, the pooled median end error doesn't worsen by > 5 %, and the whole-drive false standstill doesn't rise > 20 %.
+
+STOP after I2a / I2b / M1: show one compact table (rows: hold-last-fix, R1 default, the I2a grid top 3, I2a chosen, +I2b, +M1) and push.
+
+═════ C — honest demo layer (only when I say "go C") ═════
+- export_frontend_data.py --filter vehicle_dr (default), honest: no sim-aided, no VBOX input, no map-matching to VBOX. Keep the ground-truth track only as the separately labelled "reference" layer.
+- An RTS smoother for vehicle_dr as a separate OFFLINE layer ("post-drive smoothed", never shown as live).
+- Frontend: the outage window read from the export (not hard-coded in useGNSSStatus.ts / TimelineSlider); remove fake hard-coded values (e.g. "LOCKED (11 SATS)" in Sidebar.tsx / StatusPanel.tsx) — show real values from the export or "n/a"; GNSS hidden during the outage; AERIS continues from the last GNSS fix; the uncertainty ellipse from cov_matrix.
+- A PNG of S3b (truth, phone fixes, vehicle_dr, old ESEKF, RTS, outage shaded) in backend/exports/evaluation/. Run the frontend build to check it compiles. Commit + push, stop.
+
+═════ D-design — OpenStreetMap road matching (proposal only, no code, after C) ═════
+Write a design section in AERIS_FINDINGS.md covering:
+- Data: OSM road network for the S3b / S2 / S3c areas via Overpass (or an extract), cached in the repo with ODbL attribution; the drivable-road filter.
+- Two candidate architectures, with pros and cons: (A) EKF pseudo-measurements (the distance to the nearest road segment as position, the road bearing as heading, gated, σ from road width + OSM error) — simple, fails at junctions; (B) a road-constrained particle filter / multi-hypothesis tracker: particles move along the road graph using vehicle_dr's speed and gyro heading change, weighted by how well the gyro turn matches the road geometry at junctions ("turn matching"), resampled at GNSS fixes. Recommend one.
+- How the ambiguity at junctions is handled, and what happens when OSM is missing or the car leaves the road (car parks, private roads).
+- How it is scored honestly (OSM is independent data; VBOX is scoring only; S3c stays sealed until B5).
+- An estimate of the effort and the expected gain (use the dev windows' cross-track error as the target).
+Stop for approval.
+
+Before any /clear: update the handoff section, commit, push.
+```
+
+# R1 — adopt ALL as the default (2026-09-27)
+Set `use_brake_gate`, `use_self_cal` (`self_cal_k` 2.0), `use_anticascade`, `use_replay` = True and `w_exit` = 0.05 as the `VDRParams` field defaults in `vehicle_dr.py` (previously all False / 0.10 — the S1 "ALL" combination, see "S1 — stationarity detector fixes" above).
+No other code changed: this is purely a default-value flip, so the bare `VDRParams()` now behaves exactly as the already-measured "ALL" row.
+
+**Reproduction (verified exact, 2026-09-27):** `PYTHONUTF8=1 python backend/check_outage.py S3b --filter vehicle_dr` -> mini-outages 21.31 / 16.09 / 63.95 (matches the documented ALL mini-mean 21.31 exactly), event mean/end/ratio 66.77 / 175.95 / 0.46 (exact), S3b dev-window median end/p90/cross/along 120.90 / 211.58 / 69.76 / 60.85 (matches 120.9/211.6/69.8/60.8).
+`python backend/dev_eval.py --name "R1 default (ALL)" --workers 4` (full S2 list, 861 windows, ~14 min) -> S3b dev 120.9 / 211.6 / 69.8 / 60.8, S2 dev 126.4 / 381.6 / 54.6 / 84.8, pooled med end 126.1, S3b mini 21.31, launch-from-stop pooled med end 133.7 (n=104), event 66.77 / 175.95 / 0.46, 1σ coverage mini/S3b/S2 55 % / 56 % / 69 % — **matches the ALL row in the S1 compact table exactly**, cell for cell.
+
+**Test suite.** Several tests pinned the pre-R1 default implicitly (bare `vehicle_dr.run_pipeline(s, None)` used as "the current/plain detector" inside isolation checks for S1a-S1e, plus two real-data/sandbox number pins). Fixed by introducing an explicit `OLD_DEFAULT = replace(VDRParams(), use_brake_gate=False, use_self_cal=False, use_anticascade=False, use_replay=False, w_exit=0.10)` constant in each affected test file (`test_s1_stationarity_fixes.py`, `test_s1_sandbox_suite.py`, `test_stationarity.py`) and using it wherever the test's intent was "the detector without this mechanism" or "the pre-R1 baseline" — so each S1 mechanism is still tested in isolation regardless of what the live default is. Renamed/added tests that were specifically ABOUT the default value (e.g. `test_current_default_fails` -> `test_old_default_failed_this_before_r1` + new `test_current_default_now_passes_after_r1`; `test_w_exit_010_is_bit_identical_to_the_default` -> `test_w_exit_010_reproduces_the_pre_r1_default` + new `test_current_default_w_exit_is_0_05`; `test_disabled_by_default_and_diagnostics_only` -> `test_replay_off_produces_no_replay_log`). Added `TestRealDataAcceptanceRule.test_current_live_default_matches_all_s1` (S3b, real data) asserting the bare default's positions/velocities are bit-identical to an explicit `ALL_S1` params object.
+
+First full run after the default flip: 310 tests, 299 pass / 11 fail / 37 skip — all 11 failures traced to the implicit-default pattern above (none a real regression). Fixed all 11; one of my OWN new tests (`test_current_default_now_enables_replay`, asserting the bare default's replay_log is non-empty on the `_quiet_cruise` sandbox) then failed on rerun for a real and correct reason: with brake_gate also on by default, the false standstill that seeds the replay trigger never fires in the first place (brake_gate suppresses it upstream) — the mechanisms interacting as designed, not a bug. Replaced it with a static flag check (`test_current_default_has_replay_flag_on`) and kept the dynamic behavior coverage in the tests that already isolate replay correctly (`test_replays_fire_and_close_the_erased_episodes`, `test_current_live_default_matches_all_s1`).
+Second full run: 314 tests, 313 pass / 1 fail (the test above) / 37 skip. After the last fix, reran all three touched files in isolation: 48/48 pass. A third full-suite run was then started to get one clean end-to-end confirmation, but the harness itself killed it (system memory pressure on this shared machine — "Machine is SHARED: a game runs on it", not a test failure) while this session was idle waiting on it; per the harness's own instruction it was not restarted. No other file was touched by R1, and an earlier broad grep across every test file for `run_pipeline(`/`VDRParams()`/`w_exit` usage found no other implicit-default dependency, so the full suite is taken as green on the strength of the two runs above rather than a fresh third one. Full suite should be reconfirmed opportunistically the next time it runs for an unrelated reason.
+
+Handoff: current default is now ALL (S1a+S1b+S1c+S1d+S1e w_exit 0.05); next step is I2a (OU speed prior).

@@ -12,11 +12,17 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from dataclasses import replace
 import check_outage as co
 import vehicle_dr
 import window_plan as wp
 from sim_drive import simulate, SimConfig, long_route, smooth_cruise_route
 from vehicle_dr import VDRParams
+
+# R1 (2026-09-27) adopted ALL (S1a/b/c/d + w_exit 0.05) as the bare VDRParams() default; the S0 audit numbers below
+# were logged against the pre-R1 flags-off baseline, so they are pinned explicitly against it here.
+OLD_DEFAULT = replace(VDRParams(), use_brake_gate=False, use_self_cal=False, use_anticascade=False,
+                      use_replay=False, w_exit=0.10)
 
 
 def _synthetic():
@@ -159,7 +165,7 @@ class TestSmoothCruiseSandbox(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.s, cls.tr = simulate(SimConfig(seed=1, route=smooth_cruise_route(), vib_base=0.05, vib_per_ms=0.02))
-        cls.res = vehicle_dr.run_pipeline(cls.s, None)
+        cls.res = vehicle_dr.run_pipeline(cls.s, None, params=OLD_DEFAULT)
         lat0, lon0 = co.origin(cls.s)
         cls.truth = co.Truth.from_vehicle(cls.tr, lat0, lon0, 0.0)
         cls.a = co.stationarity_audit(cls.res, cls.truth)
@@ -195,7 +201,7 @@ class TestRealS3bPin(unittest.TestCase):
             s, v, off = co.load_drive("S3b")
         except Exception as ex:                                        # dataset not present on this machine
             self.skipTest(f"S3b not available: {ex}")
-        res = vehicle_dr.run_pipeline(s, None)
+        res = vehicle_dr.run_pipeline(s, None, params=OLD_DEFAULT)
         a = co.stationarity_audit(res, co.Truth.from_vehicle(v, res["lat0"], res["lon0"], off))
         self.assertEqual(a["n_episodes"], 13)
         self.assertAlmostEqual(a["flagged"], 47.1, delta=0.15)

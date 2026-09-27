@@ -1,8 +1,11 @@
 """
 test_s1_stationarity_fixes.py — S1: unit-level correctness of the five stationarity-detector fixes (S1a-S1e).
 
-Each mechanism is behind its own flag, default OFF (verified bit-identical to the S0 commit when all are off,
-in test_stationarity.py / TestStandstillLog and the vehicle_dr HEAD comparison logged in AERIS_FINDINGS.md).
+Each mechanism was originally behind its own flag, default OFF (verified bit-identical to the S0 commit when all
+are off). R1 (2026-09-27) adopted ALL as the new bare-VDRParams() default (see AERIS_FINDINGS.md "R1 — adopt ALL
+as the default"). To keep testing each mechanism IN ISOLATION regardless of what the live default is, this file
+uses OLD_DEFAULT (the pre-R1 S0-commit flags-off baseline, pinned explicitly) wherever a test's intent is "the
+detector without this mechanism", rather than the bare VDRParams() default.
 This file checks the MECHANISMS in isolation (hand-checkable synthetic cases); the sandbox pass/fail criteria
 (i)-(iv) for the adopted combination are in test_s1_sandbox_suite.py.
 """
@@ -15,6 +18,9 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import vehicle_dr
 from vehicle_dr import VDRParams, _causal_median, _causal_sum
+
+OLD_DEFAULT = replace(VDRParams(), use_brake_gate=False, use_self_cal=False, use_anticascade=False,
+                      use_replay=False, w_exit=0.10)      # pre-R1 (S0-commit) flags-off baseline, pinned explicitly
 
 
 class TestCausalMedian(unittest.TestCase):
@@ -61,9 +67,9 @@ class TestS1aBrakeGate(unittest.TestCase):
 
     def test_override_never_fires_without_braking_evidence(self):
         s, _ = _quiet_cruise()
-        base = vehicle_dr.run_pipeline(s, None)
+        base = vehicle_dr.run_pipeline(s, None, params=OLD_DEFAULT)
         self.assertGreater(sum(base["stationary"]), 0)                       # the plain detector DOES flag this cruise
-        gated = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), use_brake_gate=True))
+        gated = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, use_brake_gate=True))
         overrides = [e for e in gated["standstill_log"] if e["via_override"] and not e["via_v_gate"]]
         self.assertEqual(overrides, [])                                      # no braking evidence anywhere -> none of them fire
 
@@ -71,14 +77,14 @@ class TestS1aBrakeGate(unittest.TestCase):
         from sim_drive import simulate, SimConfig
         s, _ = simulate(SimConfig(seed=0, route=[("straight", 300.0, 9.0, 0.0), ("stop", 15.0)], v0=9.0,
                                   vib_base=0.0, vib_per_ms=0.0, gyro_noise=0.0, accel_bias=(0.0, 0.0)))
-        res = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), use_brake_gate=True))
+        res = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, use_brake_gate=True))
         self.assertGreater(sum(res["stationary"]), 50)                       # the real stop is still caught
 
     def test_dv_brake_is_purely_from_the_imu_not_the_filter_state(self):
         # two different VDRParams that change the FILTER (turn_noise) must not change the precomputed dv_brake
         s, _ = _quiet_cruise()
-        r1 = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), use_brake_gate=True, turn_noise=0.5))
-        r2 = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), use_brake_gate=True, turn_noise=0.05))
+        r1 = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, use_brake_gate=True, turn_noise=0.5))
+        r2 = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, use_brake_gate=True, turn_noise=0.05))
         # same standstill flag either way, since with no braking evidence the override never fires regardless of turn_noise
         self.assertEqual(sum(r1["stationary"]), sum(r2["stationary"]))
 
@@ -90,22 +96,22 @@ class TestS1bSelfCalibration(unittest.TestCase):
     def test_bit_identical_to_default_before_two_stops_are_confirmed(self):
         from sim_drive import simulate, SimConfig, default_route          # exactly one real stop
         s, _ = simulate(SimConfig(seed=1, route=default_route()))
-        base = vehicle_dr.run_pipeline(s, None)
-        s1b = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), use_self_cal=True))
+        base = vehicle_dr.run_pipeline(s, None, params=OLD_DEFAULT)
+        s1b = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, use_self_cal=True))
         self.assertTrue(np.array_equal(base["stationary"], s1b["stationary"]))   # never reaches min_confirm=2
 
     def test_learning_activates_after_two_confirmed_stops_and_changes_the_flag(self):
         from sim_drive import simulate, SimConfig, long_route             # three real stops
         s, _ = simulate(SimConfig(seed=1, route=long_route(), vib_base=0.05, vib_per_ms=0.02))
-        base = vehicle_dr.run_pipeline(s, None)
-        s1b = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), use_self_cal=True, self_cal_k=2.0))
+        base = vehicle_dr.run_pipeline(s, None, params=OLD_DEFAULT)
+        s1b = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, use_self_cal=True, self_cal_k=2.0))
         self.assertFalse(np.array_equal(base["stationary"], s1b["stationary"]))
         self.assertLess(sum(s1b["stationary"]), sum(base["stationary"]))     # net effect here: fewer flagged rows
 
     def test_true_stops_are_still_confirmed_and_recovered(self):
         from sim_drive import simulate, SimConfig, long_route
         s, tr = simulate(SimConfig(seed=1, route=long_route(), vib_base=0.05, vib_per_ms=0.02))
-        res = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), use_self_cal=True))
+        res = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, use_self_cal=True))
         real_stop_rows = tr.stationary.values[1:]
         flagged = np.asarray(res["stationary"])
         recall = np.mean(flagged[real_stop_rows]) if real_stop_rows.any() else float("nan")
@@ -121,15 +127,15 @@ class TestS1cAntiCascade(unittest.TestCase):
         # (see AERIS_FINDINGS.md S1 for the trace). S1c must shorten this a lot.
         from sim_drive import simulate, SimConfig, smooth_cruise_route
         s, _ = simulate(SimConfig(seed=2, route=smooth_cruise_route(), vib_base=0.05, vib_per_ms=0.02))
-        plain = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), use_brake_gate=True))
-        gated = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), use_brake_gate=True, use_anticascade=True))
+        plain = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, use_brake_gate=True))
+        gated = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, use_brake_gate=True, use_anticascade=True))
         self.assertLess(sum(gated["stationary"]), sum(plain["stationary"]) * 0.5)
 
     def test_no_effect_when_there_is_nothing_to_contradict(self):
         from sim_drive import simulate, SimConfig, default_route
         s, _ = simulate(SimConfig(seed=1, route=default_route()))
-        base = vehicle_dr.run_pipeline(s, None)
-        s1c = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), use_anticascade=True))
+        base = vehicle_dr.run_pipeline(s, None, params=OLD_DEFAULT)
+        s1c = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, use_anticascade=True))
         # default_route has no false standstill (see AERIS_FINDINGS.md S0 sandbox controls): nothing for S1c to block
         self.assertTrue(np.array_equal(base["stationary"], s1c["stationary"]))
 
@@ -139,7 +145,7 @@ class TestS1dRetroactiveReplay(unittest.TestCase):
 
     def test_replays_fire_and_close_the_erased_episodes(self):
         s, _ = _quiet_cruise(n=1500)
-        res = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), use_replay=True))
+        res = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, use_replay=True))
         self.assertGreater(len(res["replay_log"]), 0)
         for rl in res["replay_log"]:
             self.assertNotIn(rl["i_entry"], [e.get("i_entry") for e in res["standstill_log"]])
@@ -147,8 +153,8 @@ class TestS1dRetroactiveReplay(unittest.TestCase):
     def test_replayed_rows_are_closer_to_truth_than_frozen(self):
         s, tr = _quiet_cruise(n=1500)
         from ins_ekf import latlon_to_enu
-        plain = vehicle_dr.run_pipeline(s, None)
-        replayed = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), use_replay=True))
+        plain = vehicle_dr.run_pipeline(s, None, params=OLD_DEFAULT)
+        replayed = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, use_replay=True))
         lat0, lon0 = plain["lat0"], plain["lon0"]
 
         def err_at(res, frac):
@@ -161,29 +167,47 @@ class TestS1dRetroactiveReplay(unittest.TestCase):
 
     def test_inactive_inside_an_outage(self):
         s, _ = _quiet_cruise(n=1500)
-        res = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), use_replay=True), outage_window=(50.0, 110.0))
+        res = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, use_replay=True), outage_window=(50.0, 110.0))
         self.assertTrue(all(rl["t"] < 50.0 or rl["t"] > 110.0 for rl in res["replay_log"]))
 
-    def test_disabled_by_default_and_diagnostics_only(self):
+    def test_replay_off_produces_no_replay_log(self):
+        # R1 adopted use_replay=True as the new default; explicitly OFF still produces no replay_log (renamed from
+        # "disabled_by_default": replay is diagnostics-only either way, see AERIS_FINDINGS.md "R1").
         s, _ = _quiet_cruise()
-        res = vehicle_dr.run_pipeline(s, None)
+        res = vehicle_dr.run_pipeline(s, None, params=OLD_DEFAULT)
         self.assertEqual(res["replay_log"], [])
+
+    def test_current_default_has_replay_flag_on(self):
+        # R1: use_replay=True by default. NOT tested by re-running _quiet_cruise bare (the ALL default's
+        # brake_gate correctly suppresses the false standstill in that exact scenario before replay ever gets a
+        # trigger to act on -- see test_override_never_fires_without_braking_evidence; that is the mechanisms
+        # interacting as designed, not a bug). Replay firing under a trigger it can actually reach is covered by
+        # test_replays_fire_and_close_the_erased_episodes (OLD_DEFAULT + use_replay=True in isolation) and by
+        # test_current_live_default_matches_all_s1 in test_s1_sandbox_suite.py (bare default on real S3b data).
+        self.assertTrue(VDRParams().use_replay)
 
 
 class TestS1eExitSensitivity(unittest.TestCase):
     """S1e is a grid over the EXISTING w_exit parameter; no new code. A tighter w_exit exits sooner or not at all
-    (never later), and moving the current default (0.10) reproduces the pre-S1 filter exactly."""
+    (never later). R1 (2026-09-27) adopted w_exit=0.05 as the new default; w_exit=0.10 (explicit) still reproduces
+    the pre-S1 (OLD_DEFAULT) filter exactly."""
 
-    def test_w_exit_010_is_bit_identical_to_the_default(self):
+    def test_w_exit_010_reproduces_the_pre_r1_default(self):
         s, _ = self._sim()
-        a = vehicle_dr.run_pipeline(s, None)
-        b = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), w_exit=0.10))
+        a = vehicle_dr.run_pipeline(s, None, params=OLD_DEFAULT)
+        b = vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, w_exit=0.10))
+        self.assertTrue(np.array_equal(a["stationary"], b["stationary"]))
+
+    def test_current_default_w_exit_is_0_05(self):
+        s, _ = self._sim()
+        a = vehicle_dr.run_pipeline(s, None)                                   # bare default: w_exit=0.05 since R1
+        b = vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), w_exit=0.05))
         self.assertTrue(np.array_equal(a["stationary"], b["stationary"]))
 
     def test_tighter_w_exit_never_increases_flagged_time(self):
         s, _ = self._sim()
-        base = sum(vehicle_dr.run_pipeline(s, None)["stationary"])
-        tight = sum(vehicle_dr.run_pipeline(s, None, params=replace(VDRParams(), w_exit=0.03))["stationary"])
+        base = sum(vehicle_dr.run_pipeline(s, None, params=OLD_DEFAULT)["stationary"])
+        tight = sum(vehicle_dr.run_pipeline(s, None, params=replace(OLD_DEFAULT, w_exit=0.03))["stationary"])
         self.assertLessEqual(tight, base)
 
     @staticmethod

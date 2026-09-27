@@ -82,7 +82,7 @@ class VDRParams:
     acc_var_enter: float = 0.10      # (m/s²)²  sum of x/y variances
     acc_var_exit: float = 0.30
     w_enter: float = 0.05            # rad/s  |mean(omega) - b_g|
-    w_exit: float = 0.10
+    w_exit: float = 0.05             # R1: was 0.10 (S1e); ALL adopted as the default, see AERIS_FINDINGS.md "R1 — adopt ALL as the default"
     v_gate: float = 2.0              # m/s    only enter standstill if the speed estimate is already low
     launch_sigma_v: float = 1.5      # m/s    speed std restored the moment standstill releases
     gnss_moving_speed: float = 2.0   # m/s    a new fix faster than this clears a standstill flag
@@ -148,7 +148,7 @@ class VDRParams:
     # running median of each (removes the accel bias) -> excess = its norm, counted only when not turning and > 0.3 m/s^2;
     # dv_brake = the causal 15 s sum of the counted excess. The gate itself (use_brake_gate) also needs the max FILTER
     # speed over the last 15 s, which is tracked online (a monotonic deque) since it depends on the evolving state.
-    use_brake_gate: bool = False
+    use_brake_gate: bool = True      # R1: adopted as part of ALL (S1 verdict), see AERIS_FINDINGS.md
     brake_w_max: float = 0.10        # rad/s: |1 s mean omega_vert| must stay below this (not a turn) for excess to count
     brake_thresh: float = 0.30       # m/s^2: excess above this counts toward dv_brake
     brake_median_s: float = 20.0     # s: causal running median window that removes the accel bias
@@ -157,14 +157,14 @@ class VDRParams:
     # S1b — self-calibrating rest level: acc_var / omega-std thresholds learned from GNSS-CONFIRMED standstills only
     # (a new fix with speed < self_cal_confirm_speed while flagged). Until self_cal_min_confirm stops are confirmed,
     # entry keeps using the fixed acc_var_enter / w_enter thresholds.
-    use_self_cal: bool = False
+    use_self_cal: bool = True        # R1: adopted as part of ALL (S1 verdict), see AERIS_FINDINGS.md
     self_cal_k: float = 2.0                  # grid {1.5, 2, 3}: entry needs acc_var < k*learned AND w_std < k*learned
     self_cal_confirm_speed: float = 0.3      # m/s
     self_cal_min_confirm: int = 2
     # S1c — anti-cascade: after a GNSS-contradicted standstill (a new fix > anticascade_speed during, or within
     # anticascade_lookback_s after, a standstill), block the v_est < v_gate entry branch for anticascade_block_s,
     # unless S1a's braking evidence (dv_brake) is present. Shares the trigger with S1d.
-    use_anticascade: bool = False
+    use_anticascade: bool = True     # R1: adopted as part of ALL (S1 verdict), see AERIS_FINDINGS.md
     anticascade_block_s: float = 20.0
     anticascade_speed: float = 2.0
     anticascade_lookback_s: float = 2.0
@@ -174,7 +174,7 @@ class VDRParams:
     # PAST for that span changes (documented, not a causality violation). Naturally inactive inside an outage (the
     # trigger needs a new fix). Simplification (disclosed): the replay redoes only the core predict + GNSS position /
     # speed / course updates, never H1a's gyro-scale k, launch calibration, centripetal or fixed-mount aiding.
-    use_replay: bool = False
+    use_replay: bool = True          # R1: adopted as part of ALL (S1 verdict), see AERIS_FINDINGS.md
     replay_buffer_s: float = 30.0
     # initial covariance (std devs)
     p0_pos: float = 5.0
