@@ -173,9 +173,19 @@ class VDRParams:
     # span with standstill entry disabled, then adopt the corrected state. Only uses data already seen; the DISPLAYED
     # PAST for that span changes (documented, not a causality violation). Naturally inactive inside an outage (the
     # trigger needs a new fix). Simplification (disclosed): the replay redoes only the core predict + GNSS position /
-    # speed / course updates, never H1a's gyro-scale k, launch calibration, centripetal or fixed-mount aiding.
+    # speed / course updates, never H1a's gyro-scale k, launch calibration, centripetal, fixed-mount aiding, or I2a's
+    # OU speed prior (v is held/random-walk during a replay, same as with use_ou=False).
     use_replay: bool = True          # R1: adopted as part of ALL (S1 verdict), see AERIS_FINDINGS.md
     replay_buffer_s: float = 30.0
+    # I2a — Ornstein-Uhlenbeck speed prior (mount-free, causal). A SPEED PRIOR FROM RECENT DRIVING, NOT A MEASUREMENT:
+    # vbar = causal median, sv = causal std (floor 1 m/s) of NEW usable GNSS fixes with speed > 2 m/s in the last
+    # ou_window_s; fewer than 3 such fixes -> inactive (v held, exactly like today). Active only while NOT stationary
+    # and NOT accel-aided (ZUPT / launch aiding always take priority); runs between fixes too, not only in outages
+    # (causal). psi_dot = e^(-dt/ou_tau); v <- vbar + (v - vbar)*a; F[3,3] = a; process noise sv^2*(1-a^2) REPLACES
+    # rw_v^2*dt for that step. See AERIS_FINDINGS.md I2a.
+    use_ou: bool = False
+    ou_tau: float = 10.0             # s: relaxation time constant (grid 5/10/20/40)
+    ou_window_s: float = 120.0       # s: causal window for vbar / sv (grid 60/120/300)
     # initial covariance (std devs)
     p0_pos: float = 5.0
     p0_psi: float = np.pi
@@ -323,13 +333,16 @@ class _EKF:
                          + ([p.p0_sg ** 2] if self.nx == 7 else []))
         self.psi_ready = False
         self.consec_pos_rej = 0
+        self.last_ou_active = False
         self.gate_log = []
         self.counts = {"pos": [0, 0], "speed": [0, 0], "course": [0, 0], "cent": [0, 0], "lat": [0, 0]}   # [accepted, rejected]
 
     # ── time update ───────────────────────────────────────────────────────────
-    def predict(self, dt, omega, stationary, a_fwd=None, k_gyro=1.0):
+    def predict(self, dt, omega, stationary, a_fwd=None, k_gyro=1.0, ou=None):
         """a_fwd: forward acceleration (phone accel projected on the launch axis) — None means v is held.
-        k_gyro: H1a gyro-scale correction (psi_dot = k_gyro * (omega - b_g)); 1.0 = uncorrected."""
+        k_gyro: H1a gyro-scale correction (psi_dot = k_gyro * (omega - b_g)); 1.0 = uncorrected.
+        ou: I2a speed prior — None (inactive: v held, as before) or (vbar, sv) from the causal GNSS-speed history;
+            active only while not stationary and not accel-aided (a_fwd priority is unchanged)."""
         p, x = self.p, self.x
         psi, v, bg = x[2], x[3], x[4]
         sc = k_gyro if self.nx == 6 else k_gyro * (1.0 + x[6])   # H1b: psi_dot = (1 + s_g) * (omega - b_g)  (times the H1a k)
@@ -340,8 +353,14 @@ class _EKF:
         x[1] += v * s * dt
         x[2] = wrap_pi(psi + w * dt)
         aided = a_fwd is not None and not stationary
+        use_ou = p.use_ou and ou is not None and not stationary and not aided
+        a_ou = None
         if aided:
             x[3] = max(0.0, v + (a_fwd - x[5]) * dt)
+        elif use_ou:                                              # I2a: speed prior from recent driving, NOT a measurement
+            vbar, sv = ou
+            a_ou = float(np.exp(-dt / p.ou_tau))
+            x[3] = vbar + (v - vbar) * a_ou
         F = np.eye(self.nx)
         F[0, 2] = -v * s * dt; F[0, 3] = c * dt
         F[1, 2] = v * c * dt;  F[1, 3] = s * dt
@@ -356,12 +375,16 @@ class _EKF:
                 F[1, 6] = 0.5 * v * c * dw * dt * dt
         if aided:
             F[3, 5] = -dt
+        elif use_ou:
+            F[3, 3] = a_ou
         q_psi = (p.sigma_gyro * dt) ** 2 + (p.turn_noise * abs(w) * dt) ** 2
         rw_v = p.rw_v_aided if aided else p.rw_v
-        q = [p.rw_pos ** 2 * dt, p.rw_pos ** 2 * dt, q_psi, rw_v ** 2 * dt, p.rw_bg ** 2 * dt, p.rw_ba ** 2 * dt]
+        q_v = (ou[1] ** 2) * (1.0 - a_ou ** 2) if use_ou else (rw_v ** 2 * dt)
+        q = [p.rw_pos ** 2 * dt, p.rw_pos ** 2 * dt, q_psi, q_v, p.rw_bg ** 2 * dt, p.rw_ba ** 2 * dt]
         if self.nx == 7:
             q.append(p.rw_sg ** 2 * dt)
         self.P = F @ self.P @ F.T + np.diag(q)
+        self.last_ou_active = bool(use_ou)          # I2a diagnostic: was the OU prior active on this predict step
 
     # ── measurement update (Joseph form) ──────────────────────────────────────
     def update(self, y, H, R, dof, kind, t, gated=True):
@@ -396,8 +419,10 @@ def _replay_span(i_entry, i_now, x0, P0, nx, p, ts, dts, wv, fixE, fixN, spd, br
     """S1d: re-run rows [i_entry, i_now] from the snapshot (x0, P0) taken right after i_entry's own predict, with
     standstill entry DISABLED throughout (never stationary: predict always uses the moving physics, no ZUPT/ZARU).
     Disclosed simplification: redoes only the core predict + GNSS position/speed/course updates — never H1a's
-    gyro-scale k (uses k_gyro = 1.0), launch calibration, centripetal or fixed-mount aiding — since none of those can
-    have fired in a span that (by construction of the replay) was never stationary. Returns (x, P, rows) where rows
+    gyro-scale k (uses k_gyro = 1.0), launch calibration, centripetal, fixed-mount aiding, or I2a's OU speed prior
+    (v is held/random-walk) — since none of those can have fired in a span that (by construction of the replay) was
+    never stationary [OU is the one exception that COULD apply to a moving span, but is left out for the same
+    "only the core predict" simplification]. Returns (x, P, rows) where rows
     is [(i, E, N, psi, v, P_pos) ...] for every replayed row, to splice back into the run's output arrays."""
     x, P = x0.copy(), P0.copy()
     rows = []
@@ -534,6 +559,8 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
     v15_dq = deque()                                 # S1a: monotonic deque, max FILTER speed over the last brake_window_s
     block_vgate_until = -1e9                         # S1c: the v_est < v_gate branch is blocked until this time
     replay_log = []                                  # S1d: one record per replay (diagnostics)
+    ou_hist = deque()                                # I2a: (t, speed) of NEW usable GNSS fixes with speed > 2 m/s, causal
+    ou_active_count = 0                              # I2a diagnostic: rows where the OU prior actually drove v (not held)
     launches = []
     aided, u_fwd = False, None                      # B3b: launch axis (phone frame) valid until the next standstill
     rest_sum, rest_cnt, stat_start = np.zeros(2), 0, None
@@ -582,7 +609,17 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
             elif fixed_on:
                 a_f = float(ax[i] * u_fixed[0] + ay[i] * u_fixed[1])
         gs_cum[i] = gs_cum[i - 1] + (0.0 if stationary else (omega - ekf.x[4]) * dt)      # H1a: uncorrected gyro integral
-        ekf.predict(dt, omega, stationary, a_f, k_gs)
+        ou_arg = None
+        if p.use_ou:
+            # I2a: vbar/sv over ou_hist fixes strictly BEFORE this row (fixes from row i itself are appended below,
+            # after this predict call, so they only affect row i+1 onward -- causal).
+            while ou_hist and t - ou_hist[0][0] > p.ou_window_s:
+                ou_hist.popleft()
+            if len(ou_hist) >= 3:
+                ou_sp = np.array([sp for _, sp in ou_hist])
+                ou_arg = (float(np.median(ou_sp)), float(max(np.std(ou_sp), 1.0)))
+        ekf.predict(dt, omega, stationary, a_f, k_gs, ou_arg)
+        ou_active_count += int(ekf.last_ou_active)
 
         # ── S1a: max FILTER speed over the last brake_window_s (a monotonic deque; O(1) amortized) ──
         if need_brake:
@@ -670,6 +707,8 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         # ── GNSS (new fixes only, never inside the outage) ───────────────────
         usable = (new_fix[i] and not in_outage
                   and not (np.isfinite(sats[i]) and sats[i] < p.min_satellites))
+        if p.use_ou and usable and np.isfinite(spd[i]) and spd[i] > 2.0:
+            ou_hist.append((t, float(spd[i])))          # I2a: available to predict() from row i+1 onward (causal)
         if usable and p.use_self_cal and stationary and np.isfinite(spd[i]) and spd[i] < p.self_cal_confirm_speed and not ss_confirmed:
             # S1b: this fix CONFIRMS the current episode is a real stop -> fold its rest signature into the learned average
             if ss_n_rows > 0:
@@ -842,6 +881,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         "gyro_scale_log": gs_log,            # H1a: (t of new fix, k after that fix, pairs in the window)
         "gyro_scale_pairs": gs_pairs,        # H1a: (t_b, x = integrated gyro, y = GNSS course change) of every accepted pair
         "gyro_state_log": sg_log,            # H1b: (t, s_g, std) after every usable new fix; psi_dot = (1 + s_g)(omega - b_g)
+        "ou_active_count": ou_active_count,  # I2a: rows where the speed prior actually drove v (0 when use_ou=False)
         "gate_counts": {k: {"accepted": a, "rejected": r} for k, (a, r) in ekf.counts.items()},
         "psi_init_time": psi_init_t,
         "params": p,

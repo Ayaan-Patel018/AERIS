@@ -44,6 +44,7 @@ UNIT_MODULES = [
     "tests.test_stationarity",  # S0 stationarity audit + standstill log
     "tests.test_s1_stationarity_fixes",  # S1a-S1e detector-fix mechanisms (unit level; all flags OFF by default)
     "tests.test_s1_sandbox_suite",       # S1 sandbox criteria (i)-(iv) + the real-data acceptance-rule pin
+    "tests.test_i2a_ou_speed_prior",     # I2a OU speed prior: mechanics + sandbox criteria (a)-(d)
 ]
 
 INTEGRATION_MODULES = [
@@ -65,6 +66,7 @@ LAYER_DESCRIPTIONS = {
     "tests.test_stationarity":     "Layer 1+2 — S0 stationarity audit and standstill log (sandbox + S3b pin)",
     "tests.test_s1_stationarity_fixes": "Layer 1+2 — S1a-S1e detector-fix mechanisms (sandbox)",
     "tests.test_s1_sandbox_suite":      "Layer 1+2 — S1 sandbox criteria (i)-(iv) + real-data acceptance-rule pin",
+    "tests.test_i2a_ou_speed_prior":    "Layer 1+2 — I2a OU speed prior (sandbox mechanics + criteria a-d)",
     "tests.test_pipeline":         "Layer 2 — End-to-end pipeline (unit + full integration)",
     "tests.test_json_schema":      "Layer 3 — JSON export schema validation",
 }

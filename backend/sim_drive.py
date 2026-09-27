@@ -78,6 +78,17 @@ def smooth_cruise_route():
             ("straight", 400, 9, 9)]
 
 
+def stop_and_go_route():
+    """I2a sandbox criterion (c): urban stop-and-go, 5 stops of varying length interleaved with turns and straights
+    of varying cruise speed (unlike multi_stop_route's uniform 90 s/10 m/s legs)."""
+    return [("straight", 150, 6, 0), ("stop", 15), ("straight", 300, 14, 4), ("turn", 90, 12, 4),
+            ("straight", 120, 5, 0), ("stop", 25), ("straight", 400, 13, 4), ("turn", -90, 12, 4),
+            ("straight", 200, 7, 0), ("stop", 10), ("straight", 250, 12, 4), ("turn", 90, 12, 4),
+            ("straight", 150, 6, 0), ("stop", 30), ("straight", 500, 14, 4), ("turn", -90, 12, 4),
+            ("straight", 180, 8, 0), ("stop", 12), ("straight", 300, 11, 4), ("turn", 90, 12, 4),
+            ("straight", 300, 12, 0)]
+
+
 def multi_stop_route(turn_launch=False):
     """Repeated straight / stop cycles (5 launches in ~135 s) for launch-calibration tests. With turn_launch the
     car pulls away INTO a 90-degree junction turn, as in urban driving."""
