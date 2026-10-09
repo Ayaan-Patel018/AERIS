@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useGNSSStatus } from '../../hooks/useGNSSStatus';
-import { Gauge, Navigation, Compass, ShieldAlert, Cpu, Zap, ChevronDown, ChevronUp } from 'lucide-react';
+import { Gauge, Navigation, Compass, ShieldAlert, Zap, ChevronDown, ChevronUp } from 'lucide-react';
 
 export const MetricsPanel: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
@@ -49,7 +49,7 @@ export const MetricsPanel: React.FC = () => {
           {isOutage && (
             <div className="sb-error-compare">
               <div className="err-col aeris">
-                <span className="err-col-tag">AERIS FUSED</span>
+                <span className="err-col-tag">RTS</span>
                 <span className="err-col-val">{aerisError.toFixed(1)}m</span>
               </div>
               <div className="err-divider">vs</div>
@@ -90,12 +90,8 @@ export const MetricsPanel: React.FC = () => {
             ></div>
           </div>
 
-          {/* Estimator Specs */}
+          {/* Update Frequency */}
           <div className="sb-stat-row" style={{ marginTop: '10px' }}>
-            <span className="sb-k"><Cpu size={12} /> ESTIMATOR</span>
-            <span className="sb-v ok">15-STATE ES-EKF</span>
-          </div>
-          <div className="sb-stat-row">
             <span className="sb-k"><Navigation size={12} /> UPDATE FREQUENCY</span>
             <span className="sb-v data">10 Hz (100 Hz IMU)</span>
           </div>

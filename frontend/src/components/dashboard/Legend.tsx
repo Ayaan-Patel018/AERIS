@@ -60,38 +60,38 @@ export const Legend: React.FC = () => {
             </button>
           </div>
 
-          {/* AERIS Fused Layer */}
+          {/* RTS Layer */}
           <div className="sb-layer-row">
             <div className="layer-ident">
               <span className="layer-symbol fused-symbol"></span>
               <div className="layer-meta">
-                <span className="layer-title">AERIS FUSED</span>
-                <span className="layer-sub">15-State ES-EKF Dead Reckoning</span>
+                <span className="layer-title">RTS</span>
+                <span className="layer-sub">Dead Reckoning</span>
               </div>
             </div>
             <button 
               className={`cockpit-switch ${layers.fused ? 'active fused' : ''}`}
               onClick={() => toggleLayer('fused')}
-              title="Toggle AERIS Fused Layer"
+              title="Toggle RTS Layer"
             >
               <span className="switch-led"></span>
               <span className="switch-state">{layers.fused ? 'ON' : 'OFF'}</span>
             </button>
           </div>
 
-          {/* RTS Smoothed Layer */}
+          {/* AERIS Layer */}
           <div className="sb-layer-row">
             <div className="layer-ident">
               <span className="layer-symbol smoothed-symbol"></span>
               <div className="layer-meta">
-                <span className="layer-title">RTS SMOOTHED</span>
-                <span className="layer-sub">Offline Rauch-Tung-Striebel</span>
+                <span className="layer-title">AERIS</span>
+                <span className="layer-sub">RTS Smoothed</span>
               </div>
             </div>
             <button 
               className={`cockpit-switch ${layers.smoothed ? 'active smoothed' : ''}`}
               onClick={() => toggleLayer('smoothed')}
-              title="Toggle RTS Smoothed Layer"
+              title="Toggle AERIS Layer"
             >
               <span className="switch-led"></span>
               <span className="switch-state">{layers.smoothed ? 'ON' : 'OFF'}</span>
