@@ -1,83 +1,94 @@
-import { useDashboardContext } from '../context/DashboardContext';
-import { useTrajectoryData } from './useTrajectoryData';
+﻿/**
+ * useGNSSStatus.ts
+ *
+ * GNSS + filter status derived from REAL per-point data only.
+ * No hardcoded outage windows, satellite counts, or signal bars.
+ * TOTAL_DURATION_S comes from driveMetadata (loaded via LoadingScreen),
+ * with a fallback to the known value of 681.1 s for the S3b dataset.
+ */
+import { useDashboardContext } from "../context/DashboardContext";
+import { useTrajectoryData } from "./useTrajectoryData";
 
-// Real outage window for the S3b 60s scenario (200s-260s of 681.1s total),
-// from backend/export_frontend_data.py. Display-only constants for
-// TimelineSlider's outage band; outage detection below reads real per-point
-// status, not these.
-export const OUTAGE_START = 0.293643;
-export const OUTAGE_END = 0.381735;
-export const TOTAL_DURATION = 681.1;
-
-// How long (as progress fraction) "GNSS REACQUIRED" shows after the real
-// outage ends before settling back to "GNSS AVAILABLE". 0.05 ≈ 34 s.
-const REACQUIRED_WINDOW = 0.05;
+// How long (as a fraction of total duration) "GNSS REACQUIRED" shows after
+// the last outage point before reverting to "GNSS AVAILABLE". ~34 s at 681 s.
+const REACQUIRED_WINDOW_FRAC = 0.05;
 
 export const useGNSSStatus = () => {
-  const { simulateOutage, manualOutageStart, progress, outageStartSec, outageEndSec } = useDashboardContext();
+  const {
+    simulateOutage,
+    manualOutageStart,
+    progress,
+    outageStartSec,
+    outageEndSec,
+    totalDurationS,
+    driveMetadata,
+  } = useDashboardContext();
+
   const { fused, currentIndex, currentFusedPos } = useTrajectoryData();
 
-  const realStatus = currentFusedPos?.status ?? 'healthy';
-  const realOutage = realStatus === 'outage' || realStatus === 'unavailable';
+  // Real status from the per-point data field
+  const realStatus = currentFusedPos?.status ?? "healthy";
+  const realOutage =
+    realStatus === "outage" || realStatus === "unavailable";
 
   const isOutage = simulateOutage ? true : realOutage;
 
-  const currentOutageEnd = (outageEndSec ?? 260) / TOTAL_DURATION;
+  // Identify the end of the most recent outage window (in progress fraction)
+  // so "REACQUIRED" only fires just after an actual outage, not at boot.
+  const lastOutage = driveMetadata?.outage_windows?.at(-1);
+  const lastOutageEndFrac = lastOutage
+    ? lastOutage.end_t
+    : outageEndSec / totalDurationS;
 
-  // "REACQUIRED" only makes sense just AFTER an outage — not any healthy
-  // moment (the old logic showed it at playback start, before any outage).
   const isRecovered =
     !simulateOutage &&
-    realStatus === 'healthy' &&
-    progress > currentOutageEnd &&
-    progress <= currentOutageEnd + REACQUIRED_WINDOW;
+    realStatus === "healthy" &&
+    progress > lastOutageEndFrac &&
+    progress <= lastOutageEndFrac + REACQUIRED_WINDOW_FRAC;
 
+  // Uncertainty (1-sigma, metres) from real data
   const uncertainty = currentFusedPos?.uncertainty ?? 0;
-  const currentVelocity = (currentFusedPos?.velocity ?? 0) * 3.6; // m/s -> km/h
+  const aerisError  = Math.sqrt(Math.max(0, uncertainty));
 
-  const rawHeading = currentFusedPos?.heading ?? 0;
-  const normalized = ((rawHeading % 360) + 360) % 360;
-  const currentHeading = Math.round(normalized * 10) / 10; // fixes 38.139999999999986°
+  // Speed: data is m/s, convert to km/h for display
+  const currentVelocity = (currentFusedPos?.velocity ?? 0) * 3.6;
 
-  const aerisError = Math.sqrt(Math.max(0, uncertainty));
-  const gnssError = isOutage ? aerisError * 3 : aerisError;
+  // Heading: degrees, normalised to [0, 360)
+  const rawHeading  = currentFusedPos?.heading ?? 0;
+  const normalised  = ((rawHeading % 360) + 360) % 360;
+  const currentHeading = Math.round(normalised * 10) / 10;
 
-  const dt = fused.length > 1 ? TOTAL_DURATION / (fused.length - 1) : 0.1;
-
-  // Outage timer: manual override gets a REAL elapsed timer from the click
-  // moment; recorded outages walk the real per-point status as before.
+  // Outage elapsed time
+  const dt = fused.length > 1 ? totalDurationS / (fused.length - 1) : 0.1;
   let outageTime = 0;
   if (simulateOutage && manualOutageStart !== null) {
-    outageTime = Math.max(0, (progress - manualOutageStart) * TOTAL_DURATION);
+    outageTime = Math.max(0, (progress - manualOutageStart) * totalDurationS);
   } else if (realOutage && fused.length) {
     let idx = currentIndex;
     let count = 0;
-    while (idx >= 0 && (fused[idx]?.status === 'outage' || fused[idx]?.status === 'unavailable')) {
+    while (
+      idx >= 0 &&
+      (fused[idx]?.status === "outage" || fused[idx]?.status === "unavailable")
+    ) {
       count++;
       idx--;
     }
     outageTime = count * dt;
   }
 
+  // Drift velocity (m/s): how fast the uncertainty is growing per second
   const drift = outageTime > 0 ? aerisError / outageTime : 0;
-
-  const MAX_UNCERTAINTY = 500;
-  const confidence = Math.max(
-    50,
-    Math.min(95, 95 - (uncertainty / MAX_UNCERTAINTY) * 45)
-  );
 
   return {
     isOutage,
     isRecovered,
     status: realStatus,
-    confidence,
     uncertainty,
     aerisError,
-    gnssError,
     outageTime,
     drift,
     currentVelocity,
     currentHeading,
+    totalDurationS,
   };
 };

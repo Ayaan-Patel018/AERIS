@@ -1,36 +1,58 @@
-import React, { useEffect } from 'react';
-import { PlaybackControls } from './PlaybackControls';
-import { TimelineSlider } from './TimelineSlider';
-import { useDashboardContext } from '../../context/DashboardContext';
-import { BarChart2 } from 'lucide-react';
+﻿import React, { useEffect } from "react";
+import { PlaybackControls } from "./PlaybackControls";
+import { TimelineSlider } from "./TimelineSlider";
+import { useDashboardContext } from "../../context/DashboardContext";
+import { BarChart2, SkipForward, SkipBack } from "lucide-react";
 
 export const BottomBar: React.FC = () => {
-  const { speed, setSpeed, isPlaying, setIsPlaying, setProgress, simulateOutage, setSimulateOutage, showCharts, setShowCharts } = useDashboardContext();
+  const {
+    speed,
+    setSpeed,
+    isPlaying,
+    setIsPlaying,
+    setProgress,
+    simulateOutage,
+    setSimulateOutage,
+    showCharts,
+    setShowCharts,
+    driveMetadata,
+    totalDurationS,
+  } = useDashboardContext();
 
   const speeds = [0.5, 1, 2, 4, 8];
 
-  // Keyboard Shortcuts
+  // Jump to next/prev outage from real metadata
+  const outageWindows = driveMetadata?.outage_windows ?? [];
+
+  const jumpToNextOutage = () => {
+    if (!outageWindows.length) return;
+    // For now jump to first outage start (multi-outage: find next after current progress)
+    const first = outageWindows[0];
+    setProgress(Math.max(0, first.start_t - 0.005));
+  };
+
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+      if (["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName)) return;
 
-      if (e.code === 'Space') {
+      if (e.code === "Space") {
         e.preventDefault();
         setIsPlaying(!isPlaying);
-      } else if (e.code === 'ArrowRight') {
+      } else if (e.code === "ArrowRight") {
         e.preventDefault();
         setProgress((prev) => Math.min(1, prev + 0.02));
-      } else if (e.code === 'ArrowLeft') {
+      } else if (e.code === "ArrowLeft") {
         e.preventDefault();
         setProgress((prev) => Math.max(0, prev - 0.02));
-      } else if (e.key === 'o' || e.key === 'O') {
+      } else if (e.key === "o" || e.key === "O") {
         e.preventDefault();
         setSimulateOutage(!simulateOutage);
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isPlaying, setIsPlaying, setProgress, simulateOutage, setSimulateOutage]);
 
   return (
@@ -38,12 +60,12 @@ export const BottomBar: React.FC = () => {
       <PlaybackControls />
       <TimelineSlider />
 
-      {/* Speed Selector */}
+      {/* Speed selector */}
       <div className="speed-pill-group">
         {speeds.map((s) => (
           <button
             key={s}
-            className={`speed-pill-btn ${speed === s ? 'active' : ''}`}
+            className={`speed-pill-btn ${speed === s ? "active" : ""}`}
             onClick={() => setSpeed(s)}
             title={`Speed: ${s}×`}
           >
@@ -52,24 +74,29 @@ export const BottomBar: React.FC = () => {
         ))}
       </div>
 
-      {/* Quick Jump to Outage */}
-      <button 
-        className="outage-toggle-btn"
-        onClick={() => setProgress(0.298)}
-        title="Jump directly to the 60-second GNSS blackout zone"
-        style={{ borderColor: 'rgba(229, 72, 77, 0.4)', color: '#FF7B7F' }}
-      >
-        <span>⚡ 60s OUTAGE</span>
-      </button>
+      {/* Jump to outage — only shown if metadata has real outage windows */}
+      {outageWindows.length > 0 && (
+        <button
+          className="outage-toggle-btn"
+          onClick={jumpToNextOutage}
+          title={`Jump to GNSS outage (${outageWindows[0].start_s.toFixed(0)}s–${outageWindows[0].end_s.toFixed(0)}s)`}
+          style={{ borderColor: "rgba(229,72,77,0.4)", color: "#FF7B7F" }}
+        >
+          <SkipForward size={13} />
+          <span>
+            {outageWindows[0].end_s - outageWindows[0].start_s}s OUTAGE
+          </span>
+        </button>
+      )}
 
-      {/* Charts Toggle */}
-      <button 
-        className={`outage-toggle-btn ${showCharts ? 'active-outage' : ''}`}
+      {/* Charts toggle */}
+      <button
+        className={`outage-toggle-btn ${showCharts ? "active-outage" : ""}`}
         onClick={() => setShowCharts(!showCharts)}
-        title="Toggle Charts"
+        title="Toggle performance charts"
       >
         <BarChart2 size={13} />
-        <span>{showCharts ? 'HIDE CHARTS' : 'SHOW CHARTS'}</span>
+        <span>{showCharts ? "HIDE CHARTS" : "SHOW CHARTS"}</span>
       </button>
     </div>
   );

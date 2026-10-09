@@ -1,11 +1,29 @@
-import React, { createContext, useContext, useState } from 'react';
-import type { ReactNode } from 'react';
+﻿import React, { createContext, useContext, useState } from "react";
+import type { ReactNode } from "react";
 
 export interface Layers {
   gt: boolean;
   gnss: boolean;
   fused: boolean;
   smoothed: boolean;
+}
+
+export interface DriveMetadata {
+  drive_id: string;
+  description: string;
+  total_duration_s: number;
+  total_points: number;
+  sample_rate_hz: number;
+  total_distance_m: number;
+  origin_lat: number;
+  origin_lon: number;
+  outage_windows: Array<{ start_t: number; end_t: number; start_s: number; end_s: number }>;
+  longest_outage_s: number;
+  status_values: string[];
+  velocity_unit: string;
+  t_normalized: boolean;
+  covariance_available_in: string[];
+  files: Record<string, string>;
 }
 
 export interface DynamicScenarioData {
@@ -37,6 +55,13 @@ interface DashboardContextType {
   showCharts: boolean;
   setShowCharts: (val: boolean) => void;
 
+  // Drive metadata (real, from metadata.json via loading screen)
+  driveMetadata: DriveMetadata | null;
+  setDriveMetadata: (data: DriveMetadata) => void;
+
+  // Derived from metadata (or fallback until metadata loads)
+  totalDurationS: number;
+
   // Interactive Scenario Control (Outage window in seconds)
   outageStartSec: number;
   outageEndSec: number;
@@ -47,21 +72,29 @@ interface DashboardContextType {
   setIsRecomputing: (val: boolean) => void;
   dynamicData: DynamicScenarioData | null;
   setDynamicData: (data: DynamicScenarioData | null) => void;
-  backendStatus: 'connected' | 'disconnected' | 'checking';
-  setBackendStatus: (status: 'connected' | 'disconnected' | 'checking') => void;
+  backendStatus: "connected" | "disconnected" | "checking";
+  setBackendStatus: (status: "connected" | "disconnected" | "checking") => void;
+
+  // Sidebar collapse
+  sidebarCollapsed: boolean;
+  setSidebarCollapsed: (val: boolean) => void;
 }
 
 const DashboardContext = createContext<DashboardContextType | undefined>(undefined);
 
-export const DashboardProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+// Real fallback duration from metadata.json (only used if context not yet initialised)
+const FALLBACK_DURATION_S = 681.1;
+
+export const DashboardProvider: React.FC<{ children: ReactNode; initialMetadata?: DriveMetadata }> = ({
+  children,
+  initialMetadata,
+}) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [simulateOutage, setSimulateOutageRaw] = useState(false);
   const [manualOutageStart, setManualOutageStart] = useState<number | null>(null);
 
-  // All 4 layers ON by default for comprehensive simultaneous comparison:
-  // Reference (Ground Truth), Raw GNSS, Real-Time InESEKF, and Offline RTS Smoothed
   const [layers, setLayers] = useState<Layers>({
     gt: true,
     gnss: true,
@@ -70,15 +103,25 @@ export const DashboardProvider: React.FC<{ children: ReactNode }> = ({ children 
   });
 
   const [showCharts, setShowCharts] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  // Interactive Outage Window (Headline 60s scenario: 200s to 260s)
-  const [outageStartSec, setOutageStartSec] = useState<number>(200.0);
-  const [outageEndSec, setOutageEndSec] = useState<number>(260.0);
+  // Drive metadata — pre-populated from loading screen if provided
+  const [driveMetadata, setDriveMetadataRaw] = useState<DriveMetadata | null>(
+    initialMetadata ?? null
+  );
+  const setDriveMetadata = (data: DriveMetadata) => setDriveMetadataRaw(data);
+
+  const totalDurationS = driveMetadata?.total_duration_s ?? FALLBACK_DURATION_S;
+
+  // Interactive Outage Window — initialised from real metadata outage_windows[0]
+  const firstOutage = driveMetadata?.outage_windows?.[0];
+  const [outageStartSec, setOutageStartSec] = useState<number>(firstOutage?.start_s ?? 200.0);
+  const [outageEndSec, setOutageEndSec] = useState<number>(firstOutage?.end_s ?? 260.0);
 
   // Live EKF Re-computation state
   const [isRecomputing, setIsRecomputing] = useState<boolean>(false);
   const [dynamicData, setDynamicData] = useState<DynamicScenarioData | null>(null);
-  const [backendStatus, setBackendStatus] = useState<'connected' | 'disconnected' | 'checking'>('checking');
+  const [backendStatus, setBackendStatus] = useState<"connected" | "disconnected" | "checking">("checking");
 
   const setOutageWindow = (startSec: number, endSec: number) => {
     const s = Math.max(0, Math.round(startSec * 10) / 10);
@@ -121,6 +164,9 @@ export const DashboardProvider: React.FC<{ children: ReactNode }> = ({ children 
         resetSimulation,
         showCharts,
         setShowCharts,
+        driveMetadata,
+        setDriveMetadata,
+        totalDurationS,
         outageStartSec,
         outageEndSec,
         setOutageWindow,
@@ -130,6 +176,8 @@ export const DashboardProvider: React.FC<{ children: ReactNode }> = ({ children 
         setDynamicData,
         backendStatus,
         setBackendStatus,
+        sidebarCollapsed,
+        setSidebarCollapsed,
       }}
     >
       {children}
@@ -139,6 +187,6 @@ export const DashboardProvider: React.FC<{ children: ReactNode }> = ({ children 
 
 export const useDashboardContext = () => {
   const context = useContext(DashboardContext);
-  if (!context) throw new Error('useDashboardContext must be used within DashboardProvider');
+  if (!context) throw new Error("useDashboardContext must be used within DashboardProvider");
   return context;
 };
