@@ -3532,3 +3532,89 @@ h2.sec-title {
 
 /* ── stat-item ok colour ─────────────────────────────────────── */
 .stat-item.ok { color: var(--status-ok); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MAP — §3.7 trajectory hover tooltip
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.map-traj-tooltip {
+  position: absolute;
+  z-index: 1500;
+  pointer-events: none;
+  background: rgba(8, 8, 14, 0.92);
+  border: 1px solid rgba(240, 128, 30, 0.4);
+  padding: 6px 10px;
+  border-radius: 3px;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.7);
+  min-width: 110px;
+}
+
+.mtt-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--f-m);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.mtt-time {
+  font-size: 11px;
+  font-weight: 700;
+  color: #F0801E;
+  border-bottom: 1px solid rgba(240, 128, 30, 0.2);
+  margin-bottom: 3px;
+  padding-bottom: 3px;
+  justify-content: center;
+}
+
+.mtt-k {
+  color: #5A5A65;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.mtt-v {
+  color: #F4F1EA;
+  font-weight: 600;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MAP — §3.8 recenter pill (appears only after user pans)
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.map-recenter-pill {
+  position: absolute;
+  bottom: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1300;
+  padding: 6px 18px;
+  font-family: var(--f-m);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #F0801E;
+  background: rgba(8, 8, 14, 0.88);
+  border: 1px solid rgba(240, 128, 30, 0.5);
+  border-radius: 20px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+  transition: all 0.15s ease;
+  animation: recenterPop 0.2s ease both;
+  pointer-events: auto;
+}
+
+.map-recenter-pill:hover {
+  background: rgba(240, 128, 30, 0.18);
+  border-color: #F0801E;
+  transform: translateX(-50%) translateY(-1px);
+}
+
+@keyframes recenterPop {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}

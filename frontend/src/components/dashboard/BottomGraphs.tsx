@@ -1,13 +1,15 @@
 ﻿/**
  * BottomGraphs.tsx — Time-series charts (SVG, no external charting library).
  *
- * Charts shown:
- *   1. Position error vs time (GNSS raw vs AERIS InES-EKF vs RTS smoothed)
- *   2. Speed vs time (AERIS EKF)
- *   3. Position uncertainty (1σ) vs time — spikes during outage, decays after
+ * Per spec §7, charts shown:
+ *   1. Speed vs time          (AERIS EKF real filter estimate)
+ *   2. Heading vs time        (AERIS EKF real heading, degrees)
+ *   3. Position uncertainty (1σ radius) vs time — THE KEY PITCH GRAPH:
+ *      spikes during each GNSS outage, decays after reacquisition
+ *   (+ Position error vs GT as a bonus comparison chart)
  *
- * GNSS outage bands sourced from REAL driveMetadata.outage_windows — no hardcoded times.
- * Playhead line synced to current scrubber position across all three graphs.
+ * GNSS outage bands from REAL driveMetadata.outage_windows.
+ * Playhead line synced to current scrubber position across all graphs.
  */
 import React from "react";
 import { useTrajectoryData } from "../../hooks/useTrajectoryData";
@@ -15,75 +17,76 @@ import { useDashboardContext } from "../../context/DashboardContext";
 
 export const BottomGraphs: React.FC = () => {
   const { gt, gnss, fused, smoothed, currentIndex } = useTrajectoryData();
-  const { progress, layers, driveMetadata, totalDurationS } = useDashboardContext();
+  const { progress, layers, driveMetadata } = useDashboardContext();
 
   if (!gt.length || !gnss.length || !fused.length) return null;
 
-  const N = fused.length;
-
-  // Outage bands from real metadata (normalised 0-1 fractions)
+  // Real outage bands from metadata
   const outageBands = driveMetadata?.outage_windows ?? [];
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
-  const pts2path = (vals: number[], mx: number, W = 300, H = 72) =>
+  // ── Coordinate helpers ─────────────────────────────────────────────────────
+  const pts2path = (vals: number[], mx: number, mn = 0, W = 300, H = 72) =>
     vals
       .map((v, i) => {
         const x  = ((i / Math.max(vals.length - 1, 1)) * W).toFixed(1);
-        const sv = isNaN(v) ? 0 : v;
-        const sm = isNaN(mx) || mx === 0 ? 1 : mx;
-        const y  = Math.max(4, Math.min(H - 2, H - (sv / sm) * (H - 12))).toFixed(1);
+        const sv = isNaN(v) ? mn : v;
+        const range = Math.max(mx - mn, 0.001);
+        const y  = Math.max(4, Math.min(H - 2, H - ((sv - mn) / range) * (H - 12))).toFixed(1);
         return `${x},${y}`;
       })
       .join(" ");
 
   const playheadX = (progress * 300).toFixed(1);
 
-  const outageRects = (H = 72) =>
-    outageBands.map((ow, i) => (
-      <g key={i}>
-        <rect
-          x={ow.start_t * 300}
-          width={Math.max(0.5, (ow.end_t - ow.start_t) * 300)}
-          height={H}
-          fill="rgba(229,72,77,0.07)"
-        />
-        <line x1={ow.start_t * 300} y1={0} x2={ow.start_t * 300} y2={H} stroke="#E5484D" strokeWidth="0.7" strokeDasharray="2,2" opacity="0.55" />
-        <line x1={ow.end_t   * 300} y1={0} x2={ow.end_t   * 300} y2={H} stroke="#E5484D" strokeWidth="0.7" strokeDasharray="2,2" opacity="0.55" />
-      </g>
-    ));
+  const OutageBands = ({ H = 72 }: { H?: number }) => (
+    <>
+      {outageBands.map((ow, i) => (
+        <g key={i}>
+          <rect x={ow.start_t * 300} width={Math.max(0.5, (ow.end_t - ow.start_t) * 300)} height={H} fill="rgba(229,72,77,0.07)" />
+          <line x1={ow.start_t * 300} y1={0} x2={ow.start_t * 300} y2={H} stroke="#E5484D" strokeWidth="0.7" strokeDasharray="2,2" opacity="0.55" />
+          <line x1={ow.end_t   * 300} y1={0} x2={ow.end_t   * 300} y2={H} stroke="#E5484D" strokeWidth="0.7" strokeDasharray="2,2" opacity="0.55" />
+        </g>
+      ))}
+    </>
+  );
 
-  // ── 1. Position error (vs ground truth) ────────────────────────────────────
-  const gnssErrPts     = gnss.map((p, i)   => Math.hypot(p.x - (gt[i]?.x ?? p.x), p.y - (gt[i]?.y ?? p.y)));
-  const fusedErrPts    = fused.map((p, i)  => Math.hypot(p.x - (gt[i]?.x ?? p.x), p.y - (gt[i]?.y ?? p.y)));
-  const smoothedErrPts = (smoothed && smoothed.length)
-    ? smoothed.map((p, i) => Math.hypot(p.x - (gt[i]?.x ?? p.x), p.y - (gt[i]?.y ?? p.y)))
-    : [];
-  const maxErr = Math.max(...gnssErrPts, ...fusedErrPts, ...(smoothedErrPts.length ? smoothedErrPts : []), 1);
-
-  const pathGnssErr     = pts2path(gnssErrPts, maxErr);
-  const pathFusedErr    = pts2path(fusedErrPts, maxErr);
-  const pathSmoothedErr = smoothedErrPts.length ? pts2path(smoothedErrPts, maxErr) : "";
-
-  const curGnssErr    = gnssErrPts[currentIndex] ?? 0;
-  const curFusedErr   = fusedErrPts[currentIndex] ?? 0;
-  const curSmoothedErr = smoothedErrPts[currentIndex] ?? 0;
-
-  // ── 2. Speed (EKF, m/s → km/h) ─────────────────────────────────────────────
+  // ── 1. Speed (m/s → km/h) ─────────────────────────────────────────────────
   const speedPts = fused.map((p) => (p.velocity ?? 0) * 3.6);
   const maxSpeed = Math.max(...speedPts, 1);
   const pathSpeed = pts2path(speedPts, maxSpeed);
   const curSpeed  = speedPts[currentIndex] ?? 0;
 
-  // ── 3. 1σ uncertainty vs time (the key graph for the demo pitch) ─────────────
+  // ── 2. Heading (degrees, 0–360) ───────────────────────────────────────────
+  const headingPts = fused.map((p) => p.heading !== undefined ? (((p.heading % 360) + 360) % 360) : 0);
+  const pathHeading = pts2path(headingPts, 360, 0);
+  const curHeading  = headingPts[currentIndex] ?? 0;
+
+  // ── 3. 1σ uncertainty — KEY graph, spikes through outage ─────────────────
   const uncPts  = fused.map((p) => p.uncertainty ?? 0);
   const maxUnc  = Math.max(...uncPts, 0.001);
   const pathUnc = pts2path(uncPts, maxUnc);
   const curUnc  = uncPts[currentIndex] ?? 0;
 
+  // ── 4. Position error vs ground-truth ────────────────────────────────────
+  const gnssErrPts   = gnss.map((p, i)  => Math.hypot(p.x - (gt[i]?.x ?? p.x), p.y - (gt[i]?.y ?? p.y)));
+  const fusedErrPts  = fused.map((p, i) => Math.hypot(p.x - (gt[i]?.x ?? p.x), p.y - (gt[i]?.y ?? p.y)));
+  const smoothedErrPts = (smoothed?.length)
+    ? smoothed.map((p, i) => Math.hypot(p.x - (gt[i]?.x ?? p.x), p.y - (gt[i]?.y ?? p.y)))
+    : [];
+  const maxErr = Math.max(...gnssErrPts, ...fusedErrPts, ...(smoothedErrPts.length ? smoothedErrPts : []), 1);
+
+  const pathGnssErr    = pts2path(gnssErrPts,   maxErr);
+  const pathFusedErr   = pts2path(fusedErrPts,  maxErr);
+  const pathSmoothedErr = smoothedErrPts.length ? pts2path(smoothedErrPts, maxErr) : "";
+  const curGnssErr    = gnssErrPts[currentIndex]   ?? 0;
+  const curFusedErr   = fusedErrPts[currentIndex]  ?? 0;
+  const curSmoothedErr = smoothedErrPts[currentIndex] ?? 0;
+
+  // ── Reusable card ─────────────────────────────────────────────────────────
   const graphCard = (
     title: string,
     legend: React.ReactNode,
-    currentStat: React.ReactNode,
+    stat: React.ReactNode,
     svgContent: React.ReactNode
   ) => (
     <div className="graph-card">
@@ -92,11 +95,11 @@ export const BottomGraphs: React.FC = () => {
           <span className="graph-title">{title}</span>
           <span className="graph-legend">{legend}</span>
         </div>
-        <div className="graph-current-stats">{currentStat}</div>
+        <div className="graph-current-stats">{stat}</div>
       </div>
       <svg className="graph-svg" viewBox="0 0 300 75" preserveAspectRatio="none">
         <rect x="0" y="0" width="300" height="75" fill="#0E0E12" />
-        {outageRects(75)}
+        <OutageBands H={75} />
         <line x1="0" y1="37" x2="300" y2="37" stroke="#1A1A22" strokeWidth="0.5" />
         <line x1="0" y1="65" x2="300" y2="65" stroke="#1A1A22" strokeWidth="0.5" />
         {svgContent}
@@ -109,19 +112,52 @@ export const BottomGraphs: React.FC = () => {
     <div className="bottom-graphs-container">
       <div style={{ gridColumn: "2 / 3", display: "flex" }}>
 
-        {/* Graph 1: Position Error */}
+        {/* Graph 1 — Speed */}
         {graphCard(
-          "POSITION ERROR",
+          "SPEED",
+          <><span className="leg-dot orange" /> EKF (km/h)</>,
+          <span className="stat-item orange">NOW: <strong>{curSpeed.toFixed(1)} km/h</strong></span>,
+          <polyline points={pathSpeed} fill="none" stroke="#F0801E" strokeWidth="1.8" />
+        )}
+
+        {/* Graph 2 — Heading (§7 explicit requirement) */}
+        {graphCard(
+          "HEADING",
+          <><span className="leg-dot orange" /> EKF (°)</>,
+          <span className="stat-item orange">NOW: <strong>{curHeading.toFixed(1)}°</strong></span>,
+          <>
+            {/* 0° and 360° gridlines for compass context */}
+            <line x1="0" y1="4"  x2="300" y2="4"  stroke="#1A1A22" strokeWidth="0.4" />
+            <line x1="0" y1="71" x2="300" y2="71" stroke="#1A1A22" strokeWidth="0.4" />
+            <polyline points={pathHeading} fill="none" stroke="#F0801E" strokeWidth="1.6" />
+          </>
+        )}
+
+        {/* Graph 3 — 1σ Uncertainty — KEY PITCH GRAPH */}
+        {graphCard(
+          "1σ UNCERTAINTY",
+          <><span className="leg-dot orange" /> AERIS (m) — grows through outage, decays on re-acq</>,
+          <span className={`stat-item ${curUnc > 0.5 ? "orange" : "ok"}`} style={{ color: curUnc > 0.5 ? "#F0801E" : "var(--status-ok)" }}>
+            NOW: <strong>±{curUnc.toFixed(3)} m</strong>
+          </span>,
+          <polyline points={pathUnc} fill="none" stroke="#F0801E" strokeWidth="1.8" />
+        )}
+
+        {/* Graph 4 — Position Error vs GT (comparison) */}
+        {graphCard(
+          "POSITION ERROR vs VBOX",
           <>
             <span className="leg-dot cyan" /> GNSS RAW
             <span className="leg-dot orange" /> AERIS EKF
-            {layers.smoothed && <><span className="leg-dot" style={{ background: "#A855F7", display: "inline-block", width: 7, height: 7, borderRadius: "50%", marginLeft: 6 }} /> RTS</>}
+            {layers.smoothed && smoothedErrPts.length > 0 && (
+              <><span className="leg-dot" style={{ background: "#A855F7", display: "inline-block", width: 5, height: 5, borderRadius: "50%", marginLeft: 4 }} /> RTS</>
+            )}
           </>,
           <>
             <span className="stat-item cyan">RAW: <strong>{curGnssErr.toFixed(2)} m</strong></span>
             <span className="stat-item orange">EKF: <strong>{curFusedErr.toFixed(2)} m</strong></span>
             {layers.smoothed && smoothedErrPts.length > 0 && (
-              <span className="stat-item purple" style={{ color: "#A855F7" }}>RTS: <strong>{curSmoothedErr.toFixed(2)} m</strong></span>
+              <span className="stat-item" style={{ color: "#A855F7" }}>RTS: <strong>{curSmoothedErr.toFixed(2)} m</strong></span>
             )}
           </>,
           <>
@@ -131,24 +167,6 @@ export const BottomGraphs: React.FC = () => {
               <polyline points={pathSmoothedErr} fill="none" stroke="#A855F7" strokeWidth="1.6" />
             )}
           </>
-        )}
-
-        {/* Graph 2: Speed */}
-        {graphCard(
-          "SPEED",
-          <><span className="leg-dot orange" /> AERIS EKF (km/h)</>,
-          <span className="stat-item orange">CURRENT: <strong>{curSpeed.toFixed(1)} km/h</strong></span>,
-          <polyline points={pathSpeed} fill="none" stroke="#F0801E" strokeWidth="1.6" />
-        )}
-
-        {/* Graph 3: 1σ Uncertainty — key pitch graph */}
-        {graphCard(
-          "1σ UNCERTAINTY",
-          <><span className="leg-dot orange" /> AERIS (m)</>,
-          <span className={`stat-item ${curUnc > 0.5 ? "orange" : "ok"}`} style={{ color: curUnc > 0.5 ? "#F0801E" : "var(--status-ok)" }}>
-            NOW: <strong>±{curUnc.toFixed(3)} m</strong>
-          </span>,
-          <polyline points={pathUnc} fill="none" stroke="#F0801E" strokeWidth="1.8" />
         )}
 
       </div>

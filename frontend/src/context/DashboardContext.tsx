@@ -1,4 +1,4 @@
-﻿import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useContext, useState } from "react";
 import type { ReactNode } from "react";
 
 export interface Layers {
@@ -96,7 +96,7 @@ export const DashboardProvider: React.FC<{ children: ReactNode; initialMetadata?
   const [manualOutageStart, setManualOutageStart] = useState<number | null>(null);
 
   const [layers, setLayers] = useState<Layers>({
-    gt: true,
+    gt: false,      // §3.3: Reference/VBOX path OFF by default; user must toggle it on
     gnss: true,
     fused: true,
     smoothed: true,
