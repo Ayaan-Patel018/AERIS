@@ -13,11 +13,13 @@ import pandas as pd
 
 # ── dataset availability ──────────────────────────────────────────────────────
 # tests/ → backend/ → project_root/ → GNN and RAG/ (where IO-VNBD lives)
-# AERIS_DATA_DIR (optional) = the IO-VNBD folder itself, e.g. <repo>/IO-VNBD. Unset or empty -> the old default
-# (IO-VNBD one level ABOVE the repo), so a run without the variable behaves exactly as before.
+# AERIS_DATA_DIR (optional) = the IO-VNBD folder itself. Unset or empty -> <repo>/IO-VNBD if that folder exists,
+# else the old default (IO-VNBD one level ABOVE the repo).
 _REPO_ROOT   = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _DATASET_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-_IOVNBD_DIR = os.environ.get("AERIS_DATA_DIR") or os.path.join(_DATASET_ROOT, "IO-VNBD")
+_REPO_IOVNBD = os.path.join(_REPO_ROOT, "IO-VNBD")
+_IOVNBD_DIR = (os.environ.get("AERIS_DATA_DIR")
+               or (_REPO_IOVNBD if os.path.isdir(_REPO_IOVNBD) else os.path.join(_DATASET_ROOT, "IO-VNBD")))
 
 S3b_BASE = os.path.join(
     _IOVNBD_DIR, "Synchronised V abd S datasets",

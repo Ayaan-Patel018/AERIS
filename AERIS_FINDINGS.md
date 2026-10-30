@@ -1351,3 +1351,9 @@ in_sample true), `backend/tests/test_c1_export_vdr.py` (20 tests, S3b <= 300 s, 
   dr 5233 / warmup 168. The rejoin: at 262.1 s the first fix's position is gate-rejected (d2 9.9 > 9.21), only its speed is used (38.2 m step); the 271.0 s
   replay accepts the next fix (159.5 m).
 * score_export S3b 200-260 s = check_outage exactly: mean 66.47, end 165.54, along/cross at end -111.19/+122.64, path ratio 0.46, 1-sigma coverage 14.7 % (n 557).
+
+# C1b — test data fallback + LF-normalised provenance hash (2026-10-30)
+* conftest: AERIS_DATA_DIR unset -> <repo>/IO-VNBD if it exists, else the old default; test_c1_export_vdr finds S3b through conftest and stays in the full suite.
+* export_vdr meta.sha256 is now computed on LF-normalised bytes (CRLF -> LF), + test_sha256_is_lf_normalised. The S3b export is NOT re-exported: the
+  LF-normalised hashes of export_vdr.py / vehicle_dr.py at c357b55 equal the hashes already in its meta (the working tree was LF), so meta is unchanged.
+* Full suite with NO AERIS_DATA_DIR: 351 run / 351 pass / 0 skipped / 0 failed, 1268 s (330 + 20 C1 + 1 new).

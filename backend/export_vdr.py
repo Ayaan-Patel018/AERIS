@@ -248,8 +248,9 @@ def build_trip(s_df, drive, outages=DEFAULT_OUTAGES, params=None):
 
 # ── provenance + output ───────────────────────────────────────────────────────
 def _sha256(path):
+    # LF-normalised (CRLF -> LF, as git stores the blob), so a Windows checkout with autocrlf hashes the same
     with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+        return hashlib.sha256(f.read().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def provenance():

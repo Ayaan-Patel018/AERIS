@@ -1,7 +1,7 @@
 """
 C1 — aeris-trip/1 export (backend/export_vdr.py) on S3b cropped to t <= 300 s.
 
-Needs AERIS_DATA_DIR (the IO-VNBD folder). Nothing here is skipped: a missing dataset FAILS every test.
+Finds S3b through conftest (AERIS_DATA_DIR, else <repo>/IO-VNBD). Nothing here is skipped: a missing dataset FAILS every test.
 All filter work happens once, at module level, while builtins.open and pandas.read_csv are patched so that any attempt to
 open a V-* (VBOX) file raises and is recorded. Cached runs (all on the same <= 300 s phone input):
   TRIP        build_trip(<= 300 s)                     — the export itself (plus one truncated re-run per replay)
@@ -22,6 +22,8 @@ import numpy as np
 import pandas
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from conftest import S3b_S_PATH       # noqa: E402
 import export_vdr                     # noqa: E402
 import vehicle_dr                     # noqa: E402
 from data_loader import load_smartphone   # noqa: E402
@@ -58,11 +60,9 @@ def _vbox_blocked():
 
 LOAD_ERROR = None
 try:
-    _dir = os.environ.get("AERIS_DATA_DIR")
-    if not _dir:
-        raise RuntimeError("AERIS_DATA_DIR is not set (it must point at the IO-VNBD folder)")
-    S_CSV = os.path.join(_dir, "Synchronised V abd S datasets", "Categorised IOVNB Dataset", "S (Driver A)", "S3b",
-                         "S-S3b.csv")
+    S_CSV = S3b_S_PATH                # conftest: AERIS_DATA_DIR, else <repo>/IO-VNBD, else the old default
+    if not os.path.isfile(S_CSV):
+        raise FileNotFoundError(f"{S_CSV} (set AERIS_DATA_DIR to the IO-VNBD folder)")
     p_open, p_csv = _vbox_blocked()
     with p_open, p_csv:
         _s = load_smartphone(S_CSV)
@@ -253,6 +253,21 @@ class TestConventions(unittest.TestCase):          # pure math: no dataset neede
             u = np.array([math.sin(math.radians(an)), math.cos(math.radians(an))])   # bearing -> (east, north)
             self.assertTrue(np.allclose(P @ u, ma ** 2 * u, atol=1e-9))
             self.assertAlmostEqual(ma ** 2 + mi ** 2, P[0, 0] + P[1, 1], places=9)
+
+
+class TestProvenanceHash(unittest.TestCase):       # no dataset needed
+    def test_sha256_is_lf_normalised(self):
+        import hashlib
+        import tempfile
+        lf = b"a = 1\nb = 2\n# \xc3\xa9\n"
+        with tempfile.TemporaryDirectory() as d:
+            p_lf, p_crlf = os.path.join(d, "lf.py"), os.path.join(d, "crlf.py")
+            with _real_open(p_lf, "wb") as f:
+                f.write(lf)
+            with _real_open(p_crlf, "wb") as f:
+                f.write(lf.replace(b"\n", b"\r\n"))
+            self.assertEqual(export_vdr._sha256(p_crlf), export_vdr._sha256(p_lf))
+            self.assertEqual(export_vdr._sha256(p_lf), hashlib.sha256(lf).hexdigest())
 
 
 class TestStrictJson(_Base):

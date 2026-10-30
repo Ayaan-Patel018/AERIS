@@ -70,7 +70,7 @@ LAYER_DESCRIPTIONS = {
     "tests.test_s1_sandbox_suite":      "Layer 1+2 — S1 sandbox criteria (i)-(iv) + real-data acceptance-rule pin",
     "tests.test_i2a_ou_speed_prior":    "Layer 1+2 — I2a OU speed prior (sandbox mechanics + criteria a-d)",
     "tests.test_i2b_turn_ceiling":       "Layer 1+2 — I2b turn speed ceiling (mechanics + adopted-default regression)",
-    "tests.test_c1_export_vdr":          "Layer 2 — C1 aeris-trip/1 export (S3b <= 300 s; needs AERIS_DATA_DIR)",
+    "tests.test_c1_export_vdr":          "Layer 2 — C1 aeris-trip/1 export (S3b <= 300 s; AERIS_DATA_DIR or <repo>/IO-VNBD)",
     "tests.test_pipeline":         "Layer 2 — End-to-end pipeline (unit + full integration)",
     "tests.test_json_schema":      "Layer 3 — JSON export schema validation",
 }
