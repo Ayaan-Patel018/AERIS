@@ -36,3 +36,18 @@ VBOX is for scoring only. No snapping to the true path.
 - S3c: final validation, sealed until B5 (no looking at its errors before then). S3a: reserve, sealed.
 - S1: "previously inspected", secondary report only, never tuned on.
 - Noise rule: windows overlap; a change < 5 % on the median end error is "no change". Keep a change only if it helps S3b AND S2 (or helps one and is neutral on the other).
+
+## Standing rules for step C (app integration; added in C0, 2026-10-30)
+- The target is Aryan's native Kotlin app fed by `vehicle_dr`. Do not use or extend: `--sim-aided` / snapped data, `ins_ekf` with VBOX yaw,
+  `server.py /run`, `outage_analysis.py`, `rts_evaluation.py`, `frontend/src/data`.
+- Never run `export_frontend_data.py`. New scripts write only to `backend/exports/`, so they run in the main checkout (no worktree).
+- VBOX only inside scoring scripts. Never S3c.
+- Tests: `backend/run_tests.py` (no pytest). Real-data tests find the dataset through `AERIS_DATA_DIR` (see `backend/tests/conftest.py`).
+- Displayed frames are causal: frame[t] = the row as emitted at time t. Replay may change internal state, never rows already emitted.
+  Every displayed position step > 5 m is a "correction" that the app draws dashed.
+- Shared machine: single process (<= 2 workers). Kill only PIDs you started. Retry a killed run at most once, then report.
+- Stage files by explicit path only, never `git add -A`. Never commit `anurag_branch_full.zip` or `branch_diff_stat.txt`.
+  Push with `git push origin fix/heading-spin`, never force. If the push is rejected, stop.
+- Set environment variables per command only (no `setx`).
+- Never edit `vehicle_dr.py` logic, defaults or metric code to make numbers match. Report the gap and stop.
+- C runs one sub-step at a time; after each sub-step's report, wait for the user's "go" (C0 done -> wait for "go C1").

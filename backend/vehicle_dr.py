@@ -195,7 +195,7 @@ class VDRParams:
     # vbar = causal median, sv = causal std (floor 1 m/s) of NEW usable GNSS fixes with speed > 2 m/s in the last
     # ou_window_s; fewer than 3 such fixes -> inactive (v held, exactly like today). Active only while NOT stationary
     # and NOT accel-aided (ZUPT / launch aiding always take priority); runs between fixes too, not only in outages
-    # (causal). psi_dot = e^(-dt/ou_tau); v <- vbar + (v - vbar)*a; F[3,3] = a; process noise sv^2*(1-a^2) REPLACES
+    # (causal). a = e^(-dt/ou_tau); v <- vbar + (v - vbar)*a; F[3,3] = a; process noise sv^2*(1-a^2) REPLACES
     # rw_v^2*dt for that step. See AERIS_FINDINGS.md I2a.
     use_ou: bool = False
     ou_tau: float = 10.0             # s: relaxation time constant (grid 5/10/20/40)
@@ -892,7 +892,7 @@ def run_pipeline(s_df, v_df=None, outage_window: Optional[Tuple[float, float]] =
         "timestamps": t_out,
         "positions": pos_out,
         "velocities": v_out,
-        "headings": hd_out,                 # psi in degrees, ENU (CCW from East) — same as the ESEKF result
+        "headings": hd_out,                 # psi in degrees, ENU (CCW from East) — NOT a compass bearing and NOT the ESEKF convention; bearing = psi_to_bearing_deg(np.radians(h))
         "covariances": cov_tr,
         "cov_matrix": cov_m,
         "gnss_status": flags,
