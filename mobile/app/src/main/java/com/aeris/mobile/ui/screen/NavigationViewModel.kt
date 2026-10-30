@@ -50,11 +50,6 @@ data class RouteStep(
  */
 class NavigationViewModel(application: Application) : AndroidViewModel(application) {
 
-    // ── Simulation Engine ────────────────────────────────────────────────
-    val simulationEngine = com.aeris.mobile.core.simulation.SimulationEngine(application)
-    var isSimulationMode by mutableStateOf(false)
-        private set
-
     // ── Origin ───────────────────────────────────────────────────────────
     /** null = "use live GPS position". Set when the user picks a custom origin. */
     var origin by mutableStateOf<GeoPoint?>(null)
@@ -152,8 +147,6 @@ class NavigationViewModel(application: Application) : AndroidViewModel(applicati
         originName = null
         originQuery = ""
         originResults = emptyList()
-        isSimulationMode = false
-        simulationEngine.stopSimulation()
     }
 
     fun swapOriginAndDestination() {
@@ -180,8 +173,6 @@ class NavigationViewModel(application: Application) : AndroidViewModel(applicati
         isNavigating = false
         geocoderResults = emptyList()
         originResults = emptyList()
-        isSimulationMode = false
-        simulationEngine.stopSimulation()
     }
 
     // --- Routing ---
@@ -209,8 +200,6 @@ class NavigationViewModel(application: Application) : AndroidViewModel(applicati
         nextManeuverDistanceM = null
         routeBearing = 0.0
         isNavigating = false
-        isSimulationMode = false
-        simulationEngine.stopSimulation()
         geocoderResults = emptyList()
         searchQuery = ""
     }
@@ -232,24 +221,6 @@ class NavigationViewModel(application: Application) : AndroidViewModel(applicati
                 )
                 routeBearing = nextStep.bearingAfter
             }
-        }
-    }
-
-    // ── Simulation Mode ──────────────────────────────────────────────────
-    
-    fun startSimulationRoute() {
-        isSimulationMode = true
-        // Hardcode destinations for the demo
-        originName = "Simulation Start"
-        destinationName = "Simulation End"
-        origin = GeoPoint(52.3704499, -1.2544378) // roughly from dataset
-        destination = GeoPoint(52.3784781, -1.2596625) 
-        
-        // Fetch the road path so we have a white dashed line from start to end
-        fetchRoute(origin!!.lat, origin!!.lon, destination!!.lat, destination!!.lon)
-
-        viewModelScope.launch {
-            simulationEngine.startSimulation(speedMultiplier = 10)
         }
     }
 

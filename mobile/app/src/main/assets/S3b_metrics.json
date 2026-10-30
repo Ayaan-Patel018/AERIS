@@ -1,0 +1,39 @@
+{
+ "schema": "aeris-metrics/1",
+ "schema_status": "DRAFT",
+ "drive": "S3b",
+ "export": "S3b_aeris_trip_v1.json",
+ "export_sha256": "4770f010623f1fe86d2a5b500d37ec3030d661e6fcf0fe2b1c9d94ceb528fb9f",
+ "reference_role": "scoring_only",
+ "in_sample": true,
+ "note": "VBOX used here for scoring only; S3b/S2 are development drives (tuned on), not validation",
+ "definitions": {
+  "mean_err": "mean horizontal error over frames with start_s <= t_s <= end_s (m)",
+  "end_err": "error at the last frame of the window (m)",
+  "along_end": "(est - ref) . reference direction of travel at the last frame, + = ahead (m)",
+  "cross_end": "(est - ref) . left normal at the last frame, + = left (m)",
+  "path_ratio": "path length of the frames / path length of the reference, both on the frame grid",
+  "inside": "coverage: % of frames whose reference position is inside the reported 1-sigma ellipse (Mahalanobis <= 1); a calibrated 2-D filter gives ~39 %"
+ },
+ "method": "check_outage.Truth + score_track (see score_export.py docstring for line citations)",
+ "outages": [
+  {
+   "start_s": 200.0,
+   "end_s": 260.0,
+   "kind": "simulated",
+   "n": 557,
+   "mean_err": 66.4652,
+   "end_err": 165.5407,
+   "max_err": 165.5407,
+   "mean_abs_along": 33.0213,
+   "mean_abs_cross": 52.6043,
+   "along_end": -111.1901,
+   "cross_end": 122.6397,
+   "path_est": 104.6889,
+   "path_true": 225.6003,
+   "path_ratio": 0.464,
+   "mean_abs_dv": 2.4454,
+   "inside": 14.7217
+  }
+ ]
+}

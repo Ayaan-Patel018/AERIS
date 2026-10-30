@@ -73,9 +73,6 @@ fun NavigationBottomPanel(
     onStopNavigation: () -> Unit,
     onStopTracking: () -> Unit,
     modifier: Modifier = Modifier,
-    isSimulationMode: Boolean = false,
-    simFusedPoint: com.aeris.mobile.core.simulation.TrajectoryPoint? = null,
-    simGnssPoint: com.aeris.mobile.core.simulation.TrajectoryPoint? = null,
 ) {
     Column(
         modifier = modifier
@@ -84,11 +81,6 @@ fun NavigationBottomPanel(
             .padding(bottom = 28.dp),
     ) {
         Spacer(modifier = Modifier.height(8.dp))
-
-        if (isSimulationMode) {
-            SimulationTelemetryPanel(simFusedPoint = simFusedPoint, simGnssPoint = simGnssPoint)
-            return@Column
-        }
 
         // ── Route fetching indicator ──────────────────────────────────────
         if (isRouteFetching) {
@@ -404,157 +396,5 @@ private fun ModeChip(motionMode: String, modifier: Modifier = Modifier) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-    }
-}
-
-// ── Simulation Telemetry Panel ────────────────────────────────────────────────
-// Entirely separate from navigation / destination logic.
-// Mirrors the AERIS frontend Sidebar design — grouped telemetry rows.
-
-private val AerisOrange = Color(0xFFF0801E)
-private val GnssTeal = Color(0xFF2DD4BF)
-private val GnssRed = Color(0xFFE5484D)
-private val OkGreen = Color(0xFF4CAF50)
-private val WarnAmber = Color(0xFFFFC107)
-
-@Composable
-fun SimulationTelemetryPanel(
-    simFusedPoint: com.aeris.mobile.core.simulation.TrajectoryPoint?,
-    simGnssPoint: com.aeris.mobile.core.simulation.TrajectoryPoint?,
-) {
-    val isGnssOutage = simFusedPoint?.isGnssHealthy == false
-
-    // Kinematics derived from fused point
-    val heading = simFusedPoint?.heading ?: 0.0
-    val cardinal = run {
-        val dirs = listOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")
-        dirs[(((heading / 45).toInt()) % 8 + 8) % 8]
-    }
-
-    Column(modifier = Modifier.fillMaxWidth()) {
-
-        // ── GROUP 1: FILTER / ESTIMATOR ──────────────────────────────────────
-        SimGroup(title = "FILTER / ESTIMATOR") {
-            SimRow(label = "GNSS State") {
-                val text = if (isGnssOutage) "OUTAGE" else "LOCKED"
-                val color = if (isGnssOutage) WarnAmber else OkGreen
-                Text(text, color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
-            }
-            SimRow(label = "RF Signal") {
-                Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
-                    val bars = if (isGnssOutage) 0 else 5
-                    repeat(5) { i ->
-                        Box(
-                            modifier = Modifier
-                                .width(5.dp)
-                                .height((6 + i * 3).dp)
-                                .clip(RoundedCornerShape(1.dp))
-                                .background(if (i < bars) Color.White else AerisGrey30)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        if (isGnssOutage) "0/5" else "5/5",
-                        color = if (isGnssOutage) WarnAmber else Color.White,
-                        fontSize = 11.sp, fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-            SimRow(label = "Satellite Fix") {
-                Text(
-                    if (isGnssOutage) "SEARCHING (0 SATS)" else "LOCKED (11 SATS)",
-                    color = if (isGnssOutage) WarnAmber else AerisGrey70,
-                    fontSize = 11.sp
-                )
-            }
-            SimRow(label = "Mode") {
-                Text(
-                    if (isGnssOutage) "DEAD RECKONING" else "InES-EKF FUSED",
-                    color = AerisOrange, fontSize = 11.sp, fontWeight = FontWeight.SemiBold
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // ── GROUP 2: KINEMATICS ───────────────────────────────────────────────
-        SimGroup(title = "KINEMATICS") {
-            SimRow(label = "Heading") {
-                Text(
-                    "${"%.1f".format(heading)}°  $cardinal",
-                    color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold
-                )
-            }
-            if (isGnssOutage) {
-                SimRow(label = "Fused vs GNSS Drift") {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("AERIS", color = AerisOrange, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                        Text("  vs  ", color = AerisGrey50, fontSize = 10.sp)
-                        Text("RAW GNSS", color = GnssRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // ── GROUP 3: TRAJECTORY LAYERS ────────────────────────────────────────
-        SimGroup(title = "TRAJECTORY LAYERS") {
-            SimRow(label = "AERIS InES-EKF") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(AerisOrange))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("ACTIVE", color = AerisOrange, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-            SimRow(label = "Raw GNSS") {
-                val gnssColor = if (isGnssOutage) GnssRed else GnssTeal
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(gnssColor))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(if (isGnssOutage) "OUTAGE" else "ACTIVE", color = gnssColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-            SimRow(label = "Update Rate") {
-                Text("10 Hz  (100 Hz IMU)", color = AerisGrey70, fontSize = 11.sp)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(20.dp))
-    }
-}
-
-@Composable
-private fun SimGroup(title: String, content: @Composable () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(AerisGrey15)
-            .padding(horizontal = 16.dp, vertical = 14.dp)
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelSmall,
-            color = AerisGrey50,
-            letterSpacing = 1.6.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Spacer(modifier = Modifier.height(10.dp))
-        content()
-    }
-}
-
-@Composable
-private fun SimRow(label: String, value: @Composable () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 5.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, color = AerisGrey50, fontSize = 11.sp, letterSpacing = 0.3.sp)
-        value()
     }
 }
