@@ -46,6 +46,7 @@ UNIT_MODULES = [
     "tests.test_s1_sandbox_suite",       # S1 sandbox criteria (i)-(iv) + the real-data acceptance-rule pin
     "tests.test_i2a_ou_speed_prior",     # I2a OU speed prior: mechanics + sandbox criteria (a)-(d)
     "tests.test_i2b_turn_ceiling",       # I2b turn speed ceiling: mechanics + adopted-default regression
+    "tests.test_c1_export_vdr",          # C1 aeris-trip/1 export: schema, withheld GNSS, causality, no VBOX
 ]
 
 INTEGRATION_MODULES = [
@@ -69,6 +70,7 @@ LAYER_DESCRIPTIONS = {
     "tests.test_s1_sandbox_suite":      "Layer 1+2 — S1 sandbox criteria (i)-(iv) + real-data acceptance-rule pin",
     "tests.test_i2a_ou_speed_prior":    "Layer 1+2 — I2a OU speed prior (sandbox mechanics + criteria a-d)",
     "tests.test_i2b_turn_ceiling":       "Layer 1+2 — I2b turn speed ceiling (mechanics + adopted-default regression)",
+    "tests.test_c1_export_vdr":          "Layer 2 — C1 aeris-trip/1 export (S3b <= 300 s; needs AERIS_DATA_DIR)",
     "tests.test_pipeline":         "Layer 2 — End-to-end pipeline (unit + full integration)",
     "tests.test_json_schema":      "Layer 3 — JSON export schema validation",
 }
@@ -175,10 +177,14 @@ if __name__ == "__main__":
                         help="Full per-test output")
     parser.add_argument("--failfast",  "-f", action="store_true",
                         help="Stop at the first failure")
+    parser.add_argument("--only", action="append", metavar="MODULE",
+                        help="Run only this module (repeatable), e.g. --only tests.test_c1_export_vdr")
     args = parser.parse_args()
 
     # Select modules
-    if args.unit_only or args.no_integration:
+    if args.only:
+        modules = args.only
+    elif args.unit_only or args.no_integration:
         modules = UNIT_MODULES
     else:
         modules = ALL_MODULES

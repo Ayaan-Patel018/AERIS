@@ -1337,3 +1337,17 @@ Plan: with the I2 winner (= R1 + I2b, since I2a has no winner) as the base, meas
 3. Same computation restricted to `--drives S2 --workers 2` (S3b is fast/single-process anyway) — killed.
 4. Fully single-process, no worker pool at all (direct `check_outage.window_benchmark` calls, no `ProcessPoolExecutor`) — **also killed**, which rules out the size of my own job as the cause: a single Python process holding one drive's dataframe is a small, bounded footprint, so the repeated kills reflect genuine external memory pressure on the shared machine (consistent with CLAUDE.md's own note that "a game runs on it"), not something scoping the job down further can fix.
 Per the harness's own instruction ("do not start it again on your own... memory may still be short"), this was not retried a fifth time. `quiet_enter_n` is left at its default (30, unchanged); M1 is not adopted (there is nothing to adopt — it was never measured) and stays a documented, ready-to-run TODO: the exact script used for the single-process attempt is reproducible (whole-drive `stationarity_audit` + `check_outage.window_benchmark(..., audit=True)` on S3b's 11 windows and a stride-4 S2 subset, for `quiet_enter_n` in {30 (current), 20, 15}). Will re-run on request, or opportunistically alongside a future step's real-data evaluation once the machine is free.
+
+# C1 — aeris-trip/1 export for the mobile app (2026-10-30; NO filter change — vehicle_dr.py / data_loader.py untouched)
+New: `backend/export_vdr.py` (vehicle_dr -> `backend/exports/<drive>_aeris_trip_v1.json`, schema aeris-trip/1 DRAFT, spec `docs/aeris_trip_v1.md`),
+`backend/score_export.py` (scores ONLY the export's frames with check_outage.Truth + score_track -> `<drive>_metrics.json`, reference_role scoring_only,
+in_sample true), `backend/tests/test_c1_export_vdr.py` (20 tests, S3b <= 300 s, needs AERIS_DATA_DIR; `run_tests.py --only tests.test_c1_export_vdr`).
+* Outages have one source (`--outage`, default 200:260): fixes inside are deleted from the input (rows repeating a deleted fix get the last kept fix), then
+  the filter runs with outage_window=None. Verified bit-identical to the check_outage path (fixes present, outage_window masks them).
+* Frames = rows as FIRST emitted: S1d replay rewrites are recovered by re-running the causal filter truncated just before each replay; frames <= 270 s are
+  identical between a <= 270 s and a <= 300 s input.
+* S3b export: 6812 frames, 69 fixes (none in 200-260 s; 5 withheld; real GNSS gap 184.0 -> 262.1 s), 47 corrections (44 gnss_rejoin, 1 launch_cal 91.9 s 5.3 m,
+  1 replay 271.0 s 159.5 m, 1 other = ZUPT position leak at the 224.7 s standstill entry, 7.1 m), 1 replay (12 rewritten rows not shown), status gnss 1411 /
+  dr 5233 / warmup 168. The rejoin: at 262.1 s the first fix's position is gate-rejected (d2 9.9 > 9.21), only its speed is used (38.2 m step); the 271.0 s
+  replay accepts the next fix (159.5 m).
+* score_export S3b 200-260 s = check_outage exactly: mean 66.47, end 165.54, along/cross at end -111.19/+122.64, path ratio 0.46, 1-sigma coverage 14.7 % (n 557).
