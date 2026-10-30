@@ -235,11 +235,11 @@ fun TripsScreen(
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
                 )
 
-                // Unprocessed phone recording card per R5 § 1 & R5 § 7
-                UnprocessedTripRowCard(
-                    title = "Trip 2026-10-18 17:42",
-                    durationDistance = "4 min • 1.1 km",
-                    onRecordNew = onOpenRecord,
+                // No processed phone recordings exist yet (the recorder's files are not listed here)
+                Text(
+                    text = "None yet",
+                    color = colors.ink3,
+                    fontSize = 12.5.sp,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
                 )
             }

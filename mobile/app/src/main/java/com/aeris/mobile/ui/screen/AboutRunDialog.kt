@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.aeris.mobile.domain.model.Drive
 import com.aeris.mobile.ui.theme.Aeris
+import com.aeris.mobile.util.Formatters
 
 /**
  * About This Run (Trust Ledger) dialog per M06 §5.
@@ -94,12 +95,22 @@ fun AboutRunDialog(drive: Drive, onDismiss: () -> Unit) {
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            LedgerItem("Filter Algorithm", "15-state Error-State EKF (EsEkf)")
-            LedgerItem("Inertial Inputs", "Phone Accelerometer & Gyroscope (~100 Hz)")
-            LedgerItem("Satellite Updates", "1 Hz GNSS position fixes")
-            LedgerItem("Reference Used as Input", "No (Strictly independent)", highlightCobalt = true)
-            LedgerItem("Map Matching", "None (Dead reckoning from motion sensors alone)")
-            LedgerItem("Evaluation Scenario", "Warwick Campus S3b (60s GNSS outage)")
+            val meta = drive.meta
+            val outage = drive.outages.firstOrNull()
+            LedgerItem("Filter", meta.filter ?: "—")
+            LedgerItem("Export", listOfNotNull(meta.schema, meta.schemaStatus, meta.gitCommit?.take(7)).joinToString(" • ").ifEmpty { "—" })
+            LedgerItem("Track", "${drive.points.size} frames over ${Formatters.formatMmSs(meta.durationSec)}")
+            LedgerItem("Satellite Updates", "${drive.baselinePoints.size} phone GNSS fixes")
+            LedgerItem("Reference Used as Input", "No (meta.referenceUsed = false)", highlightCobalt = true)
+            LedgerItem("Map Matching", "None")
+            LedgerItem(
+                "GNSS Outage",
+                outage?.let {
+                    "${it.kind ?: "—"}: ${Formatters.formatMmSs(it.startSec)}–${Formatters.formatMmSs(it.endSec)}" +
+                        (it.withheldFixCount?.let { n -> ", $n fixes withheld" } ?: "")
+                } ?: "—"
+            )
+            LedgerItem("Uncertainty", if (meta.sigmaCalibrated == false) "Filter's own 1σ ellipse, not calibrated" else "Filter's own 1σ ellipse")
             LedgerItem("Problem Statement", "SIH 2026 — ISRO Statement 26168")
 
             Spacer(modifier = Modifier.height(16.dp))

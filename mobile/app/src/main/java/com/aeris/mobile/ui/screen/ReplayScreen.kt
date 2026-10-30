@@ -67,6 +67,8 @@ import com.aeris.mobile.domain.math.EllipseMath
 import com.aeris.mobile.domain.model.Drive
 import com.aeris.mobile.domain.model.GnssStatus
 import com.aeris.mobile.domain.model.TrajectoryPoint
+import com.aeris.mobile.domain.playback.DriveMoments
+import com.aeris.mobile.domain.playback.MomentKind
 import com.aeris.mobile.domain.playback.PlaybackBanner
 import com.aeris.mobile.domain.playback.PlaybackClock
 import com.aeris.mobile.domain.playback.TrackSegments
@@ -408,7 +410,8 @@ fun ReplayScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Row 2: Moment Cards with Previous & Next buttons per V0 § 2 / V4 § 4
+            // Row 2: Moments derived from outages[] and corrections[], with Previous & Next buttons
+            val moments = remember(drive) { DriveMoments.build(drive) }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -422,9 +425,8 @@ fun ReplayScreen(
                         .background(colors.paper)
                         .border(1.dp, colors.harbor, CircleShape)
                         .clickable(role = Role.Button) {
-                            val moments = listOf(0.0f, 0.2936f, 0.55f, 0.65f, 1.0f)
-                            val prev = moments.filter { it < currentFraction - 0.02f }.maxOrNull() ?: 0.0f
-                            playbackClock.seekToFraction(prev)
+                            val prev = moments.lastOrNull { it.index < currentIndex }
+                            playbackClock.seekToIndex(prev?.index ?: 0)
                         }
                         .semantics {
                             role = Role.Button
@@ -435,43 +437,31 @@ fun ReplayScreen(
                     Text(text = "‹", color = colors.ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 }
 
-                // Horizontally scrolling moment cards carousel
+                // Horizontally scrolling moment cards (long press on an outage moment opens the compare sheet)
                 Row(
                     modifier = Modifier
                         .weight(1f)
                         .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Moment Card 1: Satellite lost (active when in outage, long press opens compare sheet per R5 § 6)
-                    MomentCard(
-                        iconText = "∿",
-                        title = "Satellite lost",
-                        time = "03:20",
-                        isActive = isOutage,
-                        isAmber = true,
-                        onClick = { playbackClock.jumpToNextOutage() },
-                        onLongClick = { compareOutage = drive.outages.firstOrNull() }
-                    )
-
-                    // Moment Card 2: Left turn
-                    MomentCard(
-                        iconText = "↰",
-                        title = "Left turn",
-                        time = "03:44",
-                        isActive = false,
-                        isAmber = false,
-                        onClick = { playbackClock.seekToFraction(0.55f) }
-                    )
-
-                    // Moment Card 3: Satellite back
-                    MomentCard(
-                        iconText = "✓",
-                        title = "Satellite back",
-                        time = "04:00",
-                        isActive = false,
-                        isAmber = false,
-                        onClick = { playbackClock.seekToFraction(0.65f) }
-                    )
+                    if (moments.isEmpty()) {
+                        Text(text = "No moments in this drive", color = colors.ink3, fontSize = 12.sp)
+                    }
+                    moments.forEach { m ->
+                        MomentCard(
+                            iconText = when (m.kind) {
+                                MomentKind.GNSS_WITHHELD -> "∿"
+                                MomentKind.GNSS_BACK -> "✓"
+                                MomentKind.CORRECTION -> "↯"
+                            },
+                            title = m.title,
+                            time = Formatters.formatMmSs(m.tSec),
+                            isActive = m.kind == MomentKind.GNSS_WITHHELD && activeOutage != null && activeOutage?.id == m.outage?.id,
+                            isAmber = m.kind != MomentKind.GNSS_BACK,
+                            onClick = { playbackClock.seekToIndex(m.index) },
+                            onLongClick = { m.outage?.let { compareOutage = it } }
+                        )
+                    }
                 }
 
                 // Next moment button '›'
@@ -482,9 +472,8 @@ fun ReplayScreen(
                         .background(colors.paper)
                         .border(1.dp, colors.harbor, CircleShape)
                         .clickable(role = Role.Button) {
-                            val moments = listOf(0.0f, 0.2936f, 0.55f, 0.65f, 1.0f)
-                            val next = moments.filter { it > currentFraction + 0.02f }.minOrNull() ?: 1.0f
-                            playbackClock.seekToFraction(next)
+                            val next = moments.firstOrNull { it.index > currentIndex }
+                            playbackClock.seekToIndex(next?.index ?: (drive.points.size - 1).coerceAtLeast(0))
                         }
                         .semantics {
                             role = Role.Button
@@ -725,8 +714,28 @@ fun ReplayScreen(
                         fontSize = 13.sp
                     )
                     Spacer(modifier = Modifier.height(10.dp))
+                    val firstOutage = drive.outages.firstOrNull()
+                    val jump = firstOutage?.let { DriveMoments.firstCorrectionAfter(drive, it) }
+                    val metrics = drive.metrics
+                    val summary = buildString {
+                        if (jump != null) {
+                            append(String.format(java.util.Locale.US, "At the first fix after the outage AERIS jumped %.1f m.", jump.jumpM))
+                        }
+                        if (metrics != null) {
+                            if (isNotEmpty()) append(" ")
+                            append(
+                                String.format(
+                                    java.util.Locale.US,
+                                    "Scored against the VBOX reference (development drive, in-sample): mean error %.1f m, end error %s over the outage.",
+                                    metrics.meanErrorMeters,
+                                    metrics.endErrorMeters?.let { String.format(java.util.Locale.US, "%.1f m", it) } ?: "—"
+                                )
+                            )
+                        }
+                        if (isEmpty()) append("—")
+                    }
                     Text(
-                        text = "AERIS was 12.8 m from the new fix after the satellite loss; holding the last fix would have left it 86 m away.",
+                        text = summary,
                         color = colors.ink,
                         fontSize = 12.5.sp,
                         lineHeight = 17.sp
@@ -769,6 +778,7 @@ fun ReplayScreen(
         if (compareOutage != null) {
             com.aeris.mobile.ui.sheet.CompareSheet(
                 outage = compareOutage,
+                drive = drive,
                 onPlayMoment = { t ->
                     compareOutage = null
                     playbackClock.seekToSeconds(t)

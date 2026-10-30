@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.aeris.mobile.domain.model.Drive
 import com.aeris.mobile.domain.model.GnssStatus
+import com.aeris.mobile.domain.playback.DriveMoments
+import com.aeris.mobile.domain.playback.MomentKind
 import com.aeris.mobile.ui.components.AerisBottomNav
 import com.aeris.mobile.ui.components.AerisNavTab
 import com.aeris.mobile.ui.theme.Aeris
@@ -281,41 +283,30 @@ fun TripDetailScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Moment 1: Satellite signal lost (tap opens playback 3s before per R5 § 2)
-            MomentListRow(
-                iconText = "∿",
-                iconBg = colors.amberSoft,
-                iconTint = colors.amberLine,
-                title = "Satellite signal lost",
-                subtitle = "03:20 • lasted 40 s",
-                onClick = { onPlayAtTimestamp(197.0) } // 200s - 3s
-            )
+            // Moments from outages[] and corrections[] (tap opens playback 3 s before)
+            val moments = remember(drive) { DriveMoments.build(drive) }
+            if (moments.isEmpty()) {
+                Text(text = "—", color = colors.ink2, fontSize = 12.sp)
+            }
+            moments.forEachIndexed { k, m ->
+                if (k > 0) {
+                    HorizontalDivider(thickness = 0.5.dp, color = colors.harbor, modifier = Modifier.padding(vertical = 8.dp))
+                }
+                MomentListRow(
+                    iconText = when (m.kind) {
+                        MomentKind.GNSS_WITHHELD -> "∿"
+                        MomentKind.GNSS_BACK -> "✓"
+                        MomentKind.CORRECTION -> "↯"
+                    },
+                    iconBg = if (m.kind == MomentKind.GNSS_BACK) colors.tealSoft else colors.amberSoft,
+                    iconTint = if (m.kind == MomentKind.GNSS_BACK) colors.teal else colors.amberLine,
+                    title = m.title,
+                    subtitle = "${Formatters.formatMmSs(m.tSec)} • ${m.detail}",
+                    onClick = { onPlayAtTimestamp((m.tSec - 3.0).coerceAtLeast(0.0)) }
+                )
+            }
 
-            HorizontalDivider(thickness = 0.5.dp, color = colors.harbor, modifier = Modifier.padding(vertical = 8.dp))
-
-            // Moment 2: Left turn
-            MomentListRow(
-                iconText = "↰",
-                iconBg = colors.harbor2,
-                iconTint = colors.ink,
-                title = "Left turn",
-                subtitle = "03:44 • 90°",
-                onClick = { onPlayAtTimestamp(221.0) }
-            )
-
-            HorizontalDivider(thickness = 0.5.dp, color = colors.harbor, modifier = Modifier.padding(vertical = 8.dp))
-
-            // Moment 3: Satellite signal back
-            MomentListRow(
-                iconText = "✓",
-                iconBg = colors.tealSoft,
-                iconTint = colors.teal,
-                title = "Satellite signal back",
-                subtitle = "04:00 • AERIS was 12 m from the new fix",
-                onClick = { onPlayAtTimestamp(237.0) }
-            )
-
-            // Section 5: How AERIS did per R5 § 2 & M06 § 7
+            // Section 5: Scored numbers, only from the metrics asset (VBOX used for scoring only)
             Spacer(modifier = Modifier.height(20.dp))
             Text(
                 text = "How AERIS did",
@@ -339,32 +330,51 @@ fun TripDetailScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Validation accuracy",
+                            text = "Scored against reference",
                             color = colors.ink,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(colors.cobaltSoft)
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                        ) {
-                            Text(
-                                text = "Held-out drive",
-                                color = colors.cobalt,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                        if (drive.metrics?.inSample == true) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(colors.amberSoft)
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    text = "Development drive, in-sample",
+                                    color = colors.amberLine,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                     Spacer(modifier = Modifier.height(6.dp))
+                    val m = drive.metrics
                     Text(
-                        text = "Mean tracking error: 4.2 m • Max drift during outage: 12.8 m (vs 86 m baseline).",
+                        text = if (m == null) "—" else String.format(
+                            java.util.Locale.US,
+                            "Outage window: mean error %.1f m • end error %s • max %.1f m • path ratio %s • inside 1σ %s (a calibrated 1σ would hold ~39 %%).",
+                            m.meanErrorMeters,
+                            m.endErrorMeters?.let { String.format(java.util.Locale.US, "%.1f m", it) } ?: "—",
+                            m.maxDriftMeters,
+                            m.pathRatio?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "—",
+                            m.insideOneSigmaPct?.let { String.format(java.util.Locale.US, "%.1f %%", it) } ?: "—"
+                        ),
                         color = colors.ink2,
                         fontSize = 12.5.sp,
                         lineHeight = 17.sp
                     )
+                    if (m != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = m.provenance,
+                            color = colors.ink3,
+                            fontSize = 11.sp
+                        )
+                    }
                 }
             }
 
@@ -393,15 +403,19 @@ fun TripDetailScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
+                            val firstOutage = drive.outages.first()
+                            val jump = DriveMoments.firstCorrectionAfter(drive, firstOutage)
                             Text(
-                                text = "Baseline comparison: Outage 1",
+                                text = "GNSS outage at ${Formatters.formatMmSs(firstOutage.startSec)}",
                                 color = colors.ink,
                                 fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "Holding last fix would have left vehicle 86 m away.",
+                                text = jump?.let {
+                                    String.format(java.util.Locale.US, "AERIS jumped %.1f m at the first fix after it.", it.jumpM)
+                                } ?: "—",
                                 color = colors.ink2,
                                 fontSize = 12.sp
                             )
@@ -434,7 +448,9 @@ fun TripDetailScreen(
                     .padding(14.dp)
             ) {
                 Text(
-                    text = "Error-State Kalman Filter (ES-EKF) fusing 100 Hz IMU (accelerometer + gyroscope) with vehicle kinematic constraints and zero-velocity updates (ZUPT).",
+                    text = "Filter: ${drive.meta.filter ?: "—"} (${drive.meta.schema ?: "—"} ${drive.meta.schemaStatus ?: ""} export, " +
+                        "backend commit ${drive.meta.gitCommit?.take(7) ?: "—"}). Inputs: phone IMU and the phone's own GNSS fixes; " +
+                        "no reference data used as input. ${drive.meta.note ?: ""}",
                     color = colors.ink2,
                     fontSize = 12.sp,
                     lineHeight = 17.sp
@@ -446,6 +462,7 @@ fun TripDetailScreen(
         if (compareOutage != null) {
             com.aeris.mobile.ui.sheet.CompareSheet(
                 outage = compareOutage,
+                drive = drive,
                 onPlayMoment = { t ->
                     compareOutage = null
                     onPlayAtTimestamp(t)

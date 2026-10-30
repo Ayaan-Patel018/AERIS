@@ -112,11 +112,6 @@ fun ExploreScreen(
 
     var selectedFilter by remember { mutableStateOf("Drives") }
 
-    // Secondary synthetic drive S2 for explore preview
-    val secondDrive = remember(bundledDrive) {
-        createDriveS2(bundledDrive)
-    }
-
     var zoomTrigger by remember { mutableStateOf(0) }
     var zoomOutTrigger by remember { mutableStateOf(0) }
     var locateTrigger by remember { mutableStateOf(0) }
@@ -343,11 +338,6 @@ fun ExploreScreen(
                     drive = bundledDrive,
                     onClick = { onSelectDrive(bundledDrive) }
                 )
-
-                DriveCard(
-                    drive = secondDrive,
-                    onClick = { onSelectDrive(secondDrive) }
-                )
             }
         }
 
@@ -472,30 +462,5 @@ private fun ExploreMapView(
             }
         },
         modifier = Modifier.fillMaxSize()
-    )
-}
-
-/**
- * Creates secondary mock Drive S2 for Explore preview per Mockup Screen 1.
- */
-private fun createDriveS2(base: Drive): Drive {
-    val count = (base.points.size * 0.7).toInt().coerceAtLeast(10)
-    val sub = base.points.take(count).map {
-        it.copy(
-            lat = it.lat + 0.002,
-            lon = it.lon + 0.002,
-            status = GnssStatus.HEALTHY
-        )
-    }
-    return Drive(
-        meta = DriveMeta(
-            id = "Drive S2",
-            name = "Campus Ring Road",
-            durationSec = 480.0,
-            totalDistanceMeters = 2600.0,
-            outageCount = 0
-        ),
-        points = sub,
-        outages = emptyList()
     )
 }

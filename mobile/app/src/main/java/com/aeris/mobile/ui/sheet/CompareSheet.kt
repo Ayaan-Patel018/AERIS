@@ -33,22 +33,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.aeris.mobile.domain.math.EventDetector
+import com.aeris.mobile.domain.model.Drive
 import com.aeris.mobile.domain.model.OutageWindow
-import com.aeris.mobile.domain.model.TrajectoryPoint
+import com.aeris.mobile.domain.playback.DriveMoments
+import com.aeris.mobile.util.Formatters
 import com.aeris.mobile.ui.theme.Aeris
 
 /**
- * Compare Sheet ("If we hadn't tracked") matching R5 § 6.
- *
- * Opened from Trip detail comparison row or from an outage moment card's long-press.
- * Shows outage comparison metrics: AERIS vs Hold last fix vs Raw satellite fixes,
- * with plain-language summary and "Play this moment" button.
+ * Compare Sheet for one outage window. Every number comes from the export or the metrics asset:
+ * - corrections[].jump_m after the window ("from the new fix" = the correction at the first fix after it);
+ * - outages[] (withheld fixes, last fix / first fix after);
+ * - the scorer's metrics, labelled as scoring (VBOX reference, development drive, in-sample).
+ * No error is computed in the app; there is no hold-last-fix row because the metrics asset has no such number.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CompareSheet(
     outage: OutageWindow?,
+    drive: Drive,
     onPlayMoment: (Double) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
@@ -58,13 +60,11 @@ fun CompareSheet(
 
     if (outage == null) return
 
-    val aerisDisplacement = EventDetector.haversineDistanceMeters(
-        outage.startPoint.lat, outage.startPoint.lon,
-        outage.endPoint.lat, outage.endPoint.lon
-    )
-    val holdLastFixError = aerisDisplacement
-    val aerisEndUncertainty = outage.endPoint.sigma ?: outage.maxUncertaintyMeters
     val durationSec = (outage.endSec - outage.startSec).coerceAtLeast(0.0)
+    val newFixJump = DriveMoments.firstCorrectionAfter(drive, outage)
+    val later = DriveMoments.correctionsAfter(drive, outage).filter { it != newFixJump }
+    val metrics = drive.metrics
+    val us = java.util.Locale.US
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -89,21 +89,20 @@ fun CompareSheet(
                 .padding(bottom = 24.dp)
         ) {
             Text(
-                text = "If we hadn't tracked",
+                text = "After the outage",
                 color = colors.ink,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = "GNSS outage at ${String.format("%02d:%02d", (outage.startSec / 60).toInt(), (outage.startSec % 60).toInt())} • lasted ${durationSec.toInt()} s",
+                text = "GNSS ${outage.kind ?: ""} outage at ${Formatters.formatMmSs(outage.startSec)} • lasted ${durationSec.toInt()} s",
                 color = colors.ink2,
                 fontSize = 13.sp
             )
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 3-Row Comparison Table per R5 § 6 & M06 § 6
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -113,47 +112,58 @@ fun CompareSheet(
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Row 1: AERIS Dead Reckoning
+                // Row 1: the jump from the new fix (corrections[].jump_m)
                 CompareTableRow(
-                    sourceLabel = "AERIS Dead Reckoning",
+                    sourceLabel = "AERIS jump at the new fix",
                     indicatorColor = colors.cobalt,
-                    errorValue = String.format("±%.1f m (1σ)", aerisEndUncertainty),
-                    trackedValue = String.format("%.0f m tracked", aerisDisplacement),
+                    errorValue = newFixJump?.let { String.format(us, "%.1f m", it.jumpM) } ?: "—",
+                    trackedValue = newFixJump?.let { "${Formatters.formatMmSs(it.tSec)} • ${it.cause.replace('_', ' ')}" } ?: "no correction",
                     isPrimary = true
                 )
 
+                // Later corrections after the window (e.g. a replay)
+                later.forEach { c ->
+                    HorizontalDivider(thickness = 0.5.dp, color = colors.harbor)
+                    CompareTableRow(
+                        sourceLabel = "Later correction",
+                        indicatorColor = colors.amberLine,
+                        errorValue = String.format(us, "%.1f m", c.jumpM),
+                        trackedValue = "${Formatters.formatMmSs(c.tSec)} • ${c.cause.replace('_', ' ')}",
+                        isPrimary = false
+                    )
+                }
+
                 HorizontalDivider(thickness = 0.5.dp, color = colors.harbor)
 
-                // Row 2: Hold last fix (Baseline)
+                // Phone GNSS during the window (outages[])
                 CompareTableRow(
-                    sourceLabel = "Baseline (Hold last fix)",
-                    indicatorColor = colors.slate,
-                    errorValue = String.format("%.0f m drift", holdLastFixError),
-                    trackedValue = "0 m (frozen)",
-                    isPrimary = false
-                )
-
-                HorizontalDivider(thickness = 0.5.dp, color = colors.harbor)
-
-                // Row 3: Raw satellite fixes
-                CompareTableRow(
-                    sourceLabel = "Raw satellite fixes",
+                    sourceLabel = "Phone GNSS",
                     indicatorColor = colors.teal,
-                    errorValue = "No fix (0 sats)",
-                    trackedValue = "Unavailable",
+                    errorValue = outage.withheldFixCount?.let { "$it fixes withheld" } ?: "—",
+                    trackedValue = "last fix ${outage.lastFixSec?.let { Formatters.formatMmSs(it) } ?: "—"} • " +
+                        "next ${outage.firstFixAfterSec?.let { Formatters.formatMmSs(it) } ?: "—"}",
                     isPrimary = false
                 )
+
+                // Scoring, only from the metrics asset
+                if (metrics != null) {
+                    HorizontalDivider(thickness = 0.5.dp, color = colors.harbor)
+                    CompareTableRow(
+                        sourceLabel = "Scoring (VBOX reference)",
+                        indicatorColor = colors.slate,
+                        errorValue = metrics.endErrorMeters?.let { String.format(us, "end error %.1f m", it) } ?: "—",
+                        trackedValue = String.format(us, "mean %.1f m • in-sample", metrics.meanErrorMeters),
+                        isPrimary = false
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Plain-language single sentence explanation per R5 § 6
             Text(
-                text = String.format(
-                    "AERIS was %.1f m from the new fix after the satellite loss; holding the last fix would have left it %.0f m away.",
-                    aerisEndUncertainty,
-                    holdLastFixError
-                ),
+                text = newFixJump?.let {
+                    String.format(us, "When GNSS returned, the first fix moved AERIS %.1f m; the app draws that step dashed, never as driving.", it.jumpM)
+                } ?: "No correction after this outage.",
                 color = colors.ink,
                 fontSize = 13.sp,
                 lineHeight = 18.sp
@@ -161,7 +171,7 @@ fun CompareSheet(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Action: Play this moment (starts playback 5s before outage per R5 § 6)
+            // Action: Play this moment (starts playback 5 s before the outage)
             Button(
                 onClick = {
                     onPlayMoment((outage.startSec - 5.0).coerceAtLeast(0.0))
