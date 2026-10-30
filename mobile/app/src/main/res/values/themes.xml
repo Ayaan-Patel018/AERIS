@@ -1,0 +1,5 @@
+<resources>
+    <!-- Base application theme. Compose handles all styling; this only
+         satisfies the XML manifest theme reference. -->
+    <style name="Theme.AERIS" parent="android:Theme.Material.NoActionBar" />
+</resources>

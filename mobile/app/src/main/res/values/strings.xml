@@ -1,0 +1,96 @@
+<resources>
+    <string name="app_name">AERIS</string>
+    <string name="app_tagline">Navigate the Unknown.</string>
+    <string name="app_subtitle">GNSS-denied dead reckoning navigation for ground vehicles</string>
+    
+    <!-- Status and HUD labels -->
+    <string name="status_locked">Satellite fix</string>
+    <string name="status_dead_reckoning">Dead reckoning</string>
+    <string name="status_degraded">Degraded fix</string>
+    <string name="status_unknown">Waiting for signal</string>
+    
+    <!-- Outage and Re-acquisition -->
+    <string name="outage_banner_title">Satellite signal lost</string>
+    <string name="outage_banner_subtitle">AERIS is dead reckoning from motion sensors alone</string>
+    <string name="reacquisition_banner_title">Satellite signal restored</string>
+    <string name="reacquisition_distance_format">AERIS was %1$.1f m from the new fix</string>
+    
+    <!-- Playback controls -->
+    <string name="action_play">Play</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_recenter">Recenter</string>
+    <string name="action_jump_outage">Jump to outage</string>
+    <string name="action_speed">Speed</string>
+    <string name="action_reset">Reset</string>
+    <string name="scrubber_accessibility_format">%1$s of %2$s, %3$s</string>
+    
+    <!-- Telemetry labels -->
+    <string name="metric_uncertainty">Uncertainty (1σ)</string>
+    <string name="metric_speed">Speed</string>
+    <string name="metric_heading">Heading</string>
+    <string name="metric_distance">Distance</string>
+    <string name="metric_duration">Duration</string>
+    <string name="metric_max_drift">Max drift</string>
+    <string name="metric_mean_error">Mean error</string>
+    
+    <!-- Trust and Debug toggles -->
+    <string name="reference_track_label">Show reference track</string>
+    <string name="reference_track_disclaimer">Reference — not used by AERIS</string>
+    <string name="reference_shown_chip">Reference shown</string>
+    <string name="baseline_gnss_label">Baseline (Hold last fix)</string>
+    <string name="confidence_corridor_label">Confidence corridor</string>
+    
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="theme_auto">Auto (system)</string>
+    <string name="theme_day">Day</string>
+    <string name="theme_night">Night</string>
+    <string name="settings_privacy_note">All drive playback and recorded sensor data remain private on this device.</string>
+    <string name="attribution_notice">Map tiles © CARTO, data © OpenStreetMap contributors</string>
+
+    <!-- R6 § 2 Strings (sentence case) -->
+    <string name="search_hint">Search places or drives</string>
+    <string name="filter_recent">Recent</string>
+    <string name="filter_saved">Saved</string>
+    <string name="filter_fuel">Fuel</string>
+    <string name="filter_drives">Drives</string>
+    <string name="filter_places">Places</string>
+    <string name="filter_moments">Moments</string>
+    <string name="status_searching_satellites">Searching for satellites</string>
+    <string name="status_satellite_signal_lost">Satellite signal lost</string>
+    <string name="status_satellite_signal_back">Satellite signal back</string>
+    <string name="action_directions">Directions</string>
+    <string name="action_save_place">Save place</string>
+    <string name="status_saved">Saved</string>
+    <string name="action_share">Share</string>
+    <string name="toast_coords_copied">Coordinates copied</string>
+    <string name="mode_driving">Driving</string>
+    <string name="option_avoid_tolls">Avoid tolls</string>
+    <string name="option_avoid_highways">Avoid highways</string>
+    <string name="route_fastest">Fastest route</string>
+    <string name="route_fewer_turns">Fewer turns</string>
+    <string name="action_start">Start</string>
+    <string name="action_steps">Steps</string>
+    <string name="action_end_navigation">End navigation</string>
+    <string name="status_rerouting">Rerouting…</string>
+    <string name="status_last_position">Last position</string>
+    <string name="status_youve_arrived">You\'ve arrived</string>
+    <string name="action_done">Done</string>
+    <string name="action_open_trip">Open trip</string>
+    <string name="action_record_sensors">Record sensors for AERIS</string>
+    <string name="status_recording_sensors">Recording sensors</string>
+    <string name="hint_passes_satellite_loss">Passes satellite-loss spot from your drives</string>
+    <string name="layer_where_satellites_lost">Where satellites were lost</string>
+    <string name="chip_playing_recorded_drive">Playing recorded drive</string>
+    <string name="action_play_trip">Play trip</string>
+    <string name="action_play_again">Play again</string>
+    <string name="action_back_to_trip">Back to trip</string>
+    <string name="title_trip_finished">Trip finished</string>
+    <string name="title_moments">Moments</string>
+    <string name="title_how_aeris_did">How AERIS did</string>
+    <string name="title_if_we_hadnt_tracked">If we hadn\'t tracked</string>
+    <string name="title_how_track_computed">How this track was computed</string>
+    <string name="status_recorded_not_processed">Recorded on this phone, not yet processed</string>
+    <string name="status_aeris_not_running">AERIS positioning isn\'t running in this build.</string>
+</resources>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Foreground: aerislogo.jpeg with inset so it doesn't get cropped -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:inset="18%"
+    android:drawable="@drawable/aeris_logo" />
