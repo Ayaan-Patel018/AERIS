@@ -293,11 +293,13 @@ fun AerisApp(
             val pt by playbackClock.currentPoint.collectAsState()
             val frac by playbackClock.currentFraction.collectAsState()
             val playing by playbackClock.isPlaying.collectAsState()
+            val outage by playbackClock.activeOutage.collectAsState()
             DashModeScreen(
                 currentPoint = pt,
                 currentFraction = frac,
-                durationSec = d?.meta?.durationSec ?: 681.0,
+                durationSec = d?.meta?.durationSec ?: 0.0,
                 isPlaying = playing,
+                activeOutage = outage,
                 driveId = d?.meta?.id ?: "S3b",
                 onTogglePlayPause = { playbackClock.togglePlayPause() },
                 onExitDashMode = { navController.popBackStack() }

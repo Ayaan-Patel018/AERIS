@@ -32,7 +32,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.aeris.mobile.domain.model.GnssStatus
+import com.aeris.mobile.domain.model.OutageWindow
 import com.aeris.mobile.domain.model.TrajectoryPoint
 import com.aeris.mobile.ui.components.GnssSignalState
 import com.aeris.mobile.ui.components.SignalChip
@@ -52,6 +52,7 @@ fun DashModeScreen(
     currentFraction: Float,
     durationSec: Double,
     isPlaying: Boolean,
+    activeOutage: OutageWindow?,
     driveId: String = "S3b",
     onTogglePlayPause: () -> Unit,
     onExitDashMode: () -> Unit,
@@ -59,10 +60,10 @@ fun DashModeScreen(
 ) {
     val colors = NightColors // Always high-contrast night palette
 
-    val status = currentPoint?.status ?: GnssStatus.UNKNOWN
-    val isOutage = status == GnssStatus.OUTAGE || status == GnssStatus.DEGRADED
-    val speedKmh = if (currentPoint?.speedMps != null) (currentPoint.speedMps * 3.6).roundToInt() else 0
-    val uncertaintyM = currentPoint?.sigma ?: 0.0
+    // Border, chip and colours key on the outages[] window, not on the frame status
+    val isOutage = activeOutage != null
+    val speedKmh = currentPoint?.speedMps?.let { (it * 3.6).roundToInt().toString() } ?: "—"
+    val uncertaintyM = currentPoint?.sigmaMajorM
 
     Box(
         modifier = modifier
@@ -140,7 +141,7 @@ fun DashModeScreen(
             Column {
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text(
-                        text = "$speedKmh",
+                        text = speedKmh,
                         color = colors.ink,
                         fontSize = 80.sp,
                         fontWeight = FontWeight.Black,
@@ -166,16 +167,17 @@ fun DashModeScreen(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "±${Formatters.formatMeters(uncertaintyM)}",
+                    text = if (uncertaintyM != null) "±${Formatters.formatMeters(uncertaintyM)}" else "—",
                     color = if (isOutage) colors.amberLine else colors.teal,
                     fontSize = 32.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                val headingDeg = currentPoint?.headingDeg ?: 0.0
-                val cardinal = Formatters.cardinal16(headingDeg)
+                val headingDeg = currentPoint?.headingDeg
                 Text(
-                    text = "Heading ${headingDeg.roundToInt()}° $cardinal",
+                    text = if (headingDeg != null) {
+                        "Heading ${headingDeg.roundToInt() % 360}° ${Formatters.cardinal16(headingDeg)}"
+                    } else "Heading —",
                     color = colors.ink2,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium

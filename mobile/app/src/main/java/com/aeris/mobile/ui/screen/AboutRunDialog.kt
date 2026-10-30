@@ -33,13 +33,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.aeris.mobile.domain.model.Drive
 import com.aeris.mobile.ui.theme.Aeris
 
 /**
  * About This Run (Trust Ledger) dialog per M06 §5.
  */
 @Composable
-fun AboutRunDialog(onDismiss: () -> Unit) {
+fun AboutRunDialog(drive: Drive, onDismiss: () -> Unit) {
     val colors = Aeris.colors
 
     Dialog(onDismissRequest = onDismiss) {
@@ -102,6 +103,26 @@ fun AboutRunDialog(onDismiss: () -> Unit) {
             LedgerItem("Problem Statement", "SIH 2026 — ISRO Statement 26168")
 
             Spacer(modifier = Modifier.height(16.dp))
+
+            // meta.note from the export, verbatim
+            drive.meta.note?.let { note ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(colors.amberSoft)
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        text = "Note: $note",
+                        color = colors.ink,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        lineHeight = 16.sp
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+            }
 
             Box(
                 modifier = Modifier

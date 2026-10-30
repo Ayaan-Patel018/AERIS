@@ -62,10 +62,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.aeris.mobile.domain.adapter.AerisTripAdapter
+import com.aeris.mobile.domain.math.EllipseMath
 import com.aeris.mobile.domain.model.Drive
 import com.aeris.mobile.domain.model.GnssStatus
 import com.aeris.mobile.domain.model.TrajectoryPoint
+import com.aeris.mobile.domain.playback.PlaybackBanner
 import com.aeris.mobile.domain.playback.PlaybackClock
+import com.aeris.mobile.domain.playback.TrackSegments
 import com.aeris.mobile.ui.components.AerisMapStyle
 import com.aeris.mobile.ui.components.LayersButton
 import com.aeris.mobile.ui.theme.Aeris
@@ -74,6 +78,14 @@ import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapView
 import com.mapbox.maps.plugin.annotation.annotations
+import com.mapbox.maps.plugin.annotation.generated.CircleAnnotation
+import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationManager
+import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.PointAnnotation
+import com.mapbox.maps.plugin.annotation.generated.PolygonAnnotation
+import com.mapbox.maps.plugin.annotation.generated.PolygonAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation
+import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PointAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PointAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.PolygonAnnotationManager
@@ -83,6 +95,7 @@ import com.mapbox.maps.plugin.annotation.generated.createPointAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolygonAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
 import com.mapbox.maps.plugin.scalebar.scalebar
+import kotlin.math.roundToInt
 
 /**
  * Trip Playback Screen matching Mockup 00 Screen 5 & R5 § 3.
@@ -124,6 +137,7 @@ fun ReplayScreen(
     var showOverflow by remember { mutableStateOf(false) }
     var compareOutage by remember { mutableStateOf<com.aeris.mobile.domain.model.OutageWindow?>(null) }
     var preRollActive by remember { mutableStateOf(true) }
+    var showAbout by remember { mutableStateOf(false) }
 
     LaunchedEffect(drive) {
         playbackClock.attachDrive(drive)
@@ -250,6 +264,13 @@ fun ReplayScreen(
                         }
                     )
                     DropdownMenuItem(
+                        text = { Text("About this run", color = colors.ink) },
+                        onClick = {
+                            showOverflow = false
+                            showAbout = true
+                        }
+                    )
+                    DropdownMenuItem(
                         text = { Text("Share this moment", color = colors.ink) },
                         onClick = { showOverflow = false }
                     )
@@ -257,9 +278,10 @@ fun ReplayScreen(
             }
         }
 
-        // 3. Outage Banner (shown during outages per Mockup Screen 5 & R5 § 3.2)
+        // 3. Banner: inside outages[] (simulated outage), or outside when the last phone fix is > 15 s old
+        val bannerText = PlaybackBanner.textFor(currentPoint, activeOutage)
         AnimatedVisibility(
-            visible = isOutage,
+            visible = bannerText != null,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier
@@ -269,7 +291,7 @@ fun ReplayScreen(
         ) {
             val outageSec = if (activeOutage != null && currentPoint != null) {
                 (currentPoint!!.timestampSec - activeOutage!!.startSec).coerceAtLeast(0.0)
-            } else 0.0
+            } else null
 
             Box(
                 modifier = Modifier
@@ -285,7 +307,7 @@ fun ReplayScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             modifier = Modifier
                                 .size(8.dp)
@@ -293,27 +315,24 @@ fun ReplayScreen(
                                 .background(colors.amberLine)
                         )
                         Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Satellite signal lost",
-                                color = colors.ink,
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "AERIS continues from the last fix.",
-                                color = colors.ink2,
-                                fontSize = 11.5.sp,
-                            )
-                        }
+                        Text(
+                            text = bannerText ?: "",
+                            color = colors.ink,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 18.sp
+                        )
                     }
 
-                    Text(
-                        text = Formatters.formatMmSs(outageSec),
-                        color = colors.amberLine,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    if (outageSec != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = Formatters.formatMmSs(outageSec),
+                            color = colors.amberLine,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
@@ -347,31 +366,32 @@ fun ReplayScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
-                // Left: Speed + Heading
+                // Left: Speed + Heading (from the frame; "—" when the frame has none)
                 Column {
-                    val spd = currentPoint?.speedMps?.let { (it * 3.6).toInt() } ?: 38
+                    val spd = currentPoint?.speedMps?.let { "${(it * 3.6).roundToInt()} km/h" } ?: "— km/h"
                     Text(
-                        text = "$spd km/h",
+                        text = spd,
                         color = colors.ink,
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Bold,
                         lineHeight = 30.sp
                     )
                     Spacer(modifier = Modifier.height(1.dp))
-                    val headingDeg = currentPoint?.headingDeg ?: 291.0
-                    val cardinal = Formatters.cardinal16(headingDeg)
+                    val headingDeg = currentPoint?.headingDeg
                     Text(
-                        text = "heading ${headingDeg.toInt()}° $cardinal",
+                        text = if (headingDeg != null) {
+                            "heading ${headingDeg.roundToInt() % 360}° ${Formatters.cardinal16(headingDeg)}"
+                        } else "heading —",
                         color = colors.ink2,
                         fontSize = 12.sp,
                     )
                 }
 
-                // Right: Position Uncertainty (1σ)
+                // Right: the filter's own 1-sigma (major semi-axis); not calibrated (meta.sigma.calibrated)
                 Column(horizontalAlignment = Alignment.End) {
-                    val uncM = currentPoint?.sigma ?: 14.0
+                    val uncM = currentPoint?.sigmaMajorM
                     Text(
-                        text = "±${Formatters.formatMeters(uncM)}",
+                        text = if (uncM != null) "±${Formatters.formatMeters(uncM)}" else "—",
                         color = if (isOutage) colors.amberLine else colors.teal,
                         fontSize = 28.sp,
                         fontWeight = FontWeight.Bold,
@@ -379,7 +399,7 @@ fun ReplayScreen(
                     )
                     Spacer(modifier = Modifier.height(1.dp))
                     Text(
-                        text = "position uncertainty, 1σ",
+                        text = if (drive.meta.sigmaCalibrated == false) "1σ major axis, not calibrated" else "position uncertainty, 1σ",
                         color = colors.ink2,
                         fontSize = 12.sp,
                     )
@@ -502,15 +522,16 @@ fun ReplayScreen(
                         cornerRadius = CornerRadius(h / 2, h / 2)
                     )
 
-                    // Outage segment
-                    val outStart = 0.29f * w
-                    val outW = (0.38f - 0.29f) * w
-                    drawRoundRect(
-                        color = colors.amberLine,
-                        topLeft = Offset(outStart, 0f),
-                        size = Size(outW, h),
-                        cornerRadius = CornerRadius(2f, 2f)
-                    )
+                    // Outage windows from outages[], positioned by frame index (same scale as currentFraction)
+                    val lastIdx = (drive.points.size - 1).coerceAtLeast(1).toFloat()
+                    for (o in drive.outages) {
+                        drawRoundRect(
+                            color = colors.amberLine,
+                            topLeft = Offset(o.startIndex / lastIdx * w, 0f),
+                            size = Size((o.endIndex - o.startIndex) / lastIdx * w, h),
+                            cornerRadius = CornerRadius(2f, 2f)
+                        )
+                    }
 
                     // Travelled progress
                     val progW = (currentFraction * w).coerceIn(0f, w)
@@ -756,6 +777,10 @@ fun ReplayScreen(
                 onDismiss = { compareOutage = null }
             )
         }
+
+        if (showAbout) {
+            AboutRunDialog(drive = drive, onDismiss = { showAbout = false })
+        }
     }
 }
 
@@ -831,6 +856,57 @@ private fun MomentCard(
     }
 }
 
+/** Corrections at least this long get a "<jump_m> m" label on the map. */
+private const val JUMP_LABEL_MIN_M = 20.0
+
+private const val COLOR_GNSS_FRAME = "#6D8BFF"     // status gnss
+private const val COLOR_DR_FRAME = "#F2A93B"       // status dr
+private const val COLOR_WARMUP_FRAME = "#8A97A6"   // status warmup
+private const val COLOR_GNSS_FIX = "#2DD4BF"
+
+/** Mapbox annotation managers and the annotations currently on the map (created once per MapView). */
+private class PlaybackLayers {
+    var background: PolylineAnnotationManager? = null
+    var ellipse: PolygonAnnotationManager? = null
+    var travelled: PolylineAnnotationManager? = null
+    var jumps: PolylineAnnotationManager? = null
+    var gnss: CircleAnnotationManager? = null
+    var labels: PointAnnotationManager? = null
+    var backgroundDrawn = false
+    var ellipseAnno: PolygonAnnotation? = null
+    val travelledAnnos = HashMap<Int, PolylineAnnotation>()
+    val travelledEnd = HashMap<Int, Int>()
+    val jumpAnnos = HashMap<Int, PolylineAnnotation>()
+    val labelAnnos = HashMap<Int, PointAnnotation>()
+    val gnssAnnos = HashMap<Int, CircleAnnotation>()
+}
+
+private fun frameColor(status: GnssStatus): String = when (status) {
+    GnssStatus.HEALTHY -> COLOR_GNSS_FRAME
+    GnssStatus.OUTAGE, GnssStatus.DEGRADED -> COLOR_DR_FRAME
+    GnssStatus.UNKNOWN -> COLOR_WARMUP_FRAME
+}
+
+private fun pointsOf(drive: Drive, from: Int, to: Int): List<Point> =
+    (from..to).map { Point.fromLngLat(drive.points[it].lon, drive.points[it].lat) }
+
+/** Closed ring of the frame's own 1-sigma ellipse (sigma_major/minor_m, ellipse_angle_deg); null if the frame has none. */
+private fun ellipseRing(p: TrajectoryPoint): List<Point>? {
+    val major = p.sigmaMajorM ?: return null
+    val minor = p.sigmaMinorM ?: return null
+    val angle = p.ellipseAngleDeg ?: return null
+    val e = EllipseMath.fromExport(p.lat, p.lon, major, minor, angle)
+    return EllipseMath.generatePolygonPoints(e).map { (lat, lon) -> Point.fromLngLat(lon, lat) }
+}
+
+/**
+ * Replay map. Layers, bottom to top:
+ * - whole drive, faint, split at every correction (no solid line across a jump);
+ * - the current frame's 1-sigma ellipse;
+ * - travelled path, solid, coloured by frame status, split at corrections;
+ * - every correction reached so far as a dashed segment (labelled with jump_m when >= 20 m);
+ * - phone GNSS fixes up to now, matched by t_s; none inside outages[], and the layer is hidden while an outage is active.
+ */
 @Composable
 private fun PlaybackMapView(
     drive: Drive,
@@ -849,9 +925,15 @@ private fun PlaybackMapView(
     var lastZoomInTrigger by remember { mutableStateOf(zoomInTrigger) }
     var lastZoomOutTrigger by remember { mutableStateOf(zoomOutTrigger) }
 
-    val polyManager = remember { mutableStateOf<PolylineAnnotationManager?>(null) }
-    val fullTrackAnno = remember { mutableStateOf<com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation?>(null) }
-    val travelledAnno = remember { mutableStateOf<com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation?>(null) }
+    val layers = remember { PlaybackLayers() }
+    val backgroundSegments = remember(drive) { TrackSegments.build(drive.points, drive.corrections, splitOnStatus = false) }
+    val travelledSegments = remember(drive) { TrackSegments.build(drive.points, drive.corrections, splitOnStatus = true) }
+    val drawableFixes = remember(drive) {
+        drive.baselinePoints.indices.filter { k ->
+            val t = drive.baselinePoints[k].timestampSec
+            drive.outages.none { t >= it.startSec && t <= it.endSec }
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -867,13 +949,14 @@ private fun PlaybackMapView(
             }
         },
         update = { mv ->
-            // Load official Dark style per V0 § 1
             if (loadedStyleUri != mapStyle.mapboxUri) {
                 mv.mapboxMap.loadStyleUri(mapStyle.mapboxUri)
                 loadedStyleUri = mapStyle.mapboxUri
             }
 
-            val pt = currentPoint ?: drive.points.firstOrNull() ?: return@AndroidView
+            if (drive.points.isEmpty()) return@AndroidView
+            val c = currentIndex.coerceIn(0, drive.points.lastIndex)
+            val pt = currentPoint ?: drive.points[c]
 
             if (!cameraCentered) {
                 mv.mapboxMap.setCamera(
@@ -894,7 +977,6 @@ private fun PlaybackMapView(
                 )
             }
 
-            // Handle zoom controls
             if (zoomInTrigger != lastZoomInTrigger) {
                 lastZoomInTrigger = zoomInTrigger
                 val z = mv.mapboxMap.cameraState.zoom
@@ -906,42 +988,138 @@ private fun PlaybackMapView(
                 mv.mapboxMap.setCamera(CameraOptions.Builder().zoom(z - 1.0).build())
             }
 
-            if (polyManager.value == null) {
-                polyManager.value = mv.annotations.createPolylineAnnotationManager()
+            // Managers in z-order (created first = drawn lowest)
+            if (layers.background == null) {
+                val annotations = mv.annotations
+                layers.background = annotations.createPolylineAnnotationManager()
+                layers.ellipse = annotations.createPolygonAnnotationManager()
+                layers.travelled = annotations.createPolylineAnnotationManager()
+                layers.jumps = annotations.createPolylineAnnotationManager().apply { lineDasharray = listOf(2.0, 1.5) }
+                layers.gnss = annotations.createCircleAnnotationManager()
+                layers.labels = annotations.createPointAnnotationManager()
             }
+            val bgManager = layers.background ?: return@AndroidView
+            val ellipseManager = layers.ellipse ?: return@AndroidView
+            val travelledManager = layers.travelled ?: return@AndroidView
+            val jumpManager = layers.jumps ?: return@AndroidView
+            val gnssManager = layers.gnss ?: return@AndroidView
+            val labelManager = layers.labels ?: return@AndroidView
 
-            val pm = polyManager.value ?: return@AndroidView
-
-            // Pre-render entire track once in subtle background color per V3
-            if (fullTrackAnno.value == null && drive.points.size >= 2) {
-                val fullPts = drive.points.map { Point.fromLngLat(it.lon, it.lat) }
-                fullTrackAnno.value = pm.create(
-                    PolylineAnnotationOptions()
-                        .withPoints(fullPts)
-                        .withLineColor("#3A4B5D")
-                        .withLineWidth(3.5)
-                        .withLineOpacity(0.4)
-                )
-            }
-
-            // Update travelled line in-place without delete/create thrashing per V0 § 1 / V3
-            if (currentIndex >= 1 && drive.points.isNotEmpty()) {
-                val travelled = drive.points.take(currentIndex + 1).map { Point.fromLngLat(it.lon, it.lat) }
-                val col = if (isOutage) "#F2A93B" else "#6D8BFF"
-                val curAnno = travelledAnno.value
-                if (curAnno == null) {
-                    travelledAnno.value = pm.create(
+            // 1. Whole drive, faint, once
+            if (!layers.backgroundDrawn) {
+                for (seg in backgroundSegments) {
+                    if (seg.end <= seg.start) continue
+                    bgManager.create(
                         PolylineAnnotationOptions()
-                            .withPoints(travelled)
-                            .withLineColor(col)
-                            .withLineWidth(4.5)
+                            .withPoints(pointsOf(drive, seg.start, seg.end))
+                            .withLineColor("#3A4B5D")
+                            .withLineWidth(3.5)
+                            .withLineOpacity(0.4)
+                    )
+                }
+                layers.backgroundDrawn = true
+            }
+
+            // 2. Travelled path up to the current frame (only changed segments touch the map)
+            travelledSegments.forEachIndexed { k, seg ->
+                val want = if (seg.start >= c) -1 else minOf(seg.end, c)
+                val have = layers.travelledEnd[k] ?: -1
+                if (want == have) return@forEachIndexed
+                val existing = layers.travelledAnnos[k]
+                if (want <= seg.start) {
+                    existing?.let { travelledManager.delete(it) }
+                    layers.travelledAnnos.remove(k)
+                    layers.travelledEnd.remove(k)
+                } else {
+                    val pts = pointsOf(drive, seg.start, want)
+                    if (existing == null) {
+                        layers.travelledAnnos[k] = travelledManager.create(
+                            PolylineAnnotationOptions()
+                                .withPoints(pts)
+                                .withLineColor(frameColor(seg.status))
+                                .withLineWidth(4.5)
+                                .withLineOpacity(0.95)
+                        )
+                    } else {
+                        existing.points = pts
+                        travelledManager.update(existing)
+                    }
+                    layers.travelledEnd[k] = want
+                }
+            }
+
+            // 3. Corrections reached so far: dashed, labelled with jump_m when >= 20 m
+            drive.corrections.forEachIndexed { k, corr ->
+                val reached = corr.frameIndex <= c
+                val anno = layers.jumpAnnos[k]
+                if (reached && anno == null) {
+                    val from = Point.fromLngLat(corr.fromLon, corr.fromLat)
+                    val to = Point.fromLngLat(corr.toLon, corr.toLat)
+                    layers.jumpAnnos[k] = jumpManager.create(
+                        PolylineAnnotationOptions()
+                            .withPoints(listOf(from, to))
+                            .withLineColor(COLOR_DR_FRAME)
+                            .withLineWidth(3.0)
                             .withLineOpacity(0.95)
                     )
-                } else {
-                    curAnno.points = travelled
-                    curAnno.lineColorString = col
-                    pm.update(curAnno)
+                    if (corr.jumpM >= JUMP_LABEL_MIN_M) {
+                        val mid = Point.fromLngLat((corr.fromLon + corr.toLon) / 2.0, (corr.fromLat + corr.toLat) / 2.0)
+                        layers.labelAnnos[k] = labelManager.create(
+                            PointAnnotationOptions()
+                                .withPoint(mid)
+                                .withTextField(String.format(java.util.Locale.US, "%.1f m", corr.jumpM))
+                                .withTextSize(12.0)
+                                .withTextColor(COLOR_DR_FRAME)
+                                .withTextHaloColor("#0F1A24")
+                                .withTextHaloWidth(1.5)
+                        )
+                    }
+                } else if (!reached && anno != null) {
+                    jumpManager.delete(anno)
+                    layers.jumpAnnos.remove(k)
+                    layers.labelAnnos.remove(k)?.let { labelManager.delete(it) }
                 }
+            }
+
+            // 4. Phone GNSS fixes with t_s <= frame t_s (matched by time, never by index); hidden during an outage
+            val latestFix = if (isOutage) -1 else AerisTripAdapter.latestFixIndexAt(drive.baselinePoints, drive.points[c].timestampSec)
+            for (k in drawableFixes) {
+                val want = k <= latestFix
+                val anno = layers.gnssAnnos[k]
+                if (want && anno == null) {
+                    val g = drive.baselinePoints[k]
+                    layers.gnssAnnos[k] = gnssManager.create(
+                        CircleAnnotationOptions()
+                            .withPoint(Point.fromLngLat(g.lon, g.lat))
+                            .withCircleRadius(4.0)
+                            .withCircleColor(COLOR_GNSS_FIX)
+                            .withCircleStrokeColor("#FFFFFF")
+                            .withCircleStrokeWidth(1.0)
+                    )
+                } else if (!want && anno != null) {
+                    gnssManager.delete(anno)
+                    layers.gnssAnnos.remove(k)
+                }
+            }
+
+            // 5. The current frame's 1-sigma ellipse (filter output; meta.sigma.calibrated = false)
+            val ring = ellipseRing(drive.points[c])
+            val ellipseAnno = layers.ellipseAnno
+            val fill = if (isOutage) COLOR_DR_FRAME else COLOR_GNSS_FRAME
+            if (ring == null) {
+                ellipseAnno?.let { ellipseManager.delete(it) }
+                layers.ellipseAnno = null
+            } else if (ellipseAnno == null) {
+                layers.ellipseAnno = ellipseManager.create(
+                    PolygonAnnotationOptions()
+                        .withPoints(listOf(ring))
+                        .withFillColor(fill)
+                        .withFillOpacity(0.18)
+                )
+            } else {
+                ellipseAnno.points = listOf(ring)
+                ellipseAnno.fillColorString = fill
+                ellipseManager.update(ellipseAnno)
             }
         },
         modifier = Modifier.fillMaxSize()

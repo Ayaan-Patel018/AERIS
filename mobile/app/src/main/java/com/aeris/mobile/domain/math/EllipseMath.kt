@@ -67,6 +67,34 @@ object EllipseMath {
     }
 
     /**
+     * aeris-trip/1 ellipse angle (major axis, degrees clockwise from North) -> this class's orientation
+     * (radians counter-clockwise from East). Equal to computeEllipse's angle modulo pi.
+     */
+    fun orientationRadFromBearingDeg(ellipseAngleDeg: Double): Double = Math.toRadians(90.0 - ellipseAngleDeg)
+
+    /**
+     * Ellipse from an aeris-trip/1 frame's sigma_major_m / sigma_minor_m / ellipse_angle_deg
+     * (same 0.5 m floor as [computeEllipse]).
+     */
+    fun fromExport(
+        centerLat: Double,
+        centerLon: Double,
+        sigmaMajorM: Double,
+        sigmaMinorM: Double,
+        ellipseAngleDeg: Double,
+        use95Percent: Boolean = false,
+    ): UncertaintyEllipse {
+        val scale = if (use95Percent) SCALE_95_PERCENT else SCALE_1_SIGMA
+        return UncertaintyEllipse(
+            semiMajorMeters = (sigmaMajorM * scale).coerceAtLeast(0.5),
+            semiMinorMeters = (sigmaMinorM * scale).coerceAtLeast(0.5),
+            orientationRad = orientationRadFromBearingDeg(ellipseAngleDeg),
+            centerLat = centerLat,
+            centerLon = centerLon,
+        )
+    }
+
+    /**
      * Generates a closed polygon ring of (lat, lon) coordinates representing the ellipse boundary.
      * Suitable for Mapbox GeoJSON Polygon or Canvas drawing.
      */
