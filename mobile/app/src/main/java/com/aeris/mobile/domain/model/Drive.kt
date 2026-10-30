@@ -36,6 +36,12 @@ data class TrajectoryPoint(
     val covYY: Double?,
     val covXY: Double?,
     val distanceMeters: Double = 0.0,
+    // aeris-trip/1 frame fields (null for points that do not come from an export)
+    val sigmaMajorM: Double? = null,      // 1-sigma ellipse semi-major axis, m
+    val sigmaMinorM: Double? = null,      // 1-sigma ellipse semi-minor axis, m
+    val ellipseAngleDeg: Double? = null,  // major axis, degrees clockwise from North, [0, 180)
+    val fixAgeS: Double? = null,          // seconds since the last usable phone fix
+    val stationary: Boolean? = null,      // filter's IMU standstill flag
 )
 
 /**
@@ -52,6 +58,26 @@ data class OutageWindow(
     val startPoint: TrajectoryPoint,
     val endPoint: TrajectoryPoint,
     val maxUncertaintyMeters: Double,
+    // aeris-trip/1 outages[] fields
+    val kind: String? = null,             // "simulated": the phone had fixes, the export withheld them
+    val lastFixSec: Double? = null,       // last phone fix before startSec
+    val firstFixAfterSec: Double? = null, // first phone fix after endSec
+    val withheldFixCount: Int? = null,
+)
+
+/**
+ * A displayed position step > 5 m between consecutive frames (aeris-trip/1 corrections[]).
+ * Drawn dashed, never as driving. [frameIndex] is the frame the step lands on.
+ */
+data class Correction(
+    val tSec: Double,
+    val frameIndex: Int,
+    val fromLat: Double,
+    val fromLon: Double,
+    val toLat: Double,
+    val toLon: Double,
+    val jumpM: Double,
+    val cause: String,
 )
 
 /**
@@ -64,6 +90,10 @@ data class DriveMetrics(
     val r95Meters: Double? = null,
     val totalOutageDurationSec: Double,
     val provenance: String = "metrics.json",
+    val endErrorMeters: Double? = null,
+    val pathRatio: Double? = null,
+    val insideOneSigmaPct: Double? = null,
+    val inSample: Boolean? = null,
 )
 
 /**
@@ -78,6 +108,13 @@ data class DriveMeta(
     val dateString: String? = null,
     val referenceAvailable: Boolean = false,
     val metricsAvailable: Boolean = false,
+    // aeris-trip/1 meta fields
+    val filter: String? = null,
+    val note: String? = null,
+    val schema: String? = null,
+    val schemaStatus: String? = null,
+    val gitCommit: String? = null,
+    val sigmaCalibrated: Boolean? = null,
 )
 
 /**
@@ -90,4 +127,5 @@ data class Drive(
     val baselinePoints: List<TrajectoryPoint> = emptyList(),
     val referencePoints: List<TrajectoryPoint> = emptyList(),
     val metrics: DriveMetrics? = null,
+    val corrections: List<Correction> = emptyList(),
 )

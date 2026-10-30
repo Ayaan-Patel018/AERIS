@@ -19,7 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.aeris.mobile.domain.adapter.DriveAdapter
+import com.aeris.mobile.domain.adapter.BundledTripLoader
 import com.aeris.mobile.domain.model.Drive
 import com.aeris.mobile.domain.playback.PlaybackClock
 import com.aeris.mobile.domain.routing.RouteOption
@@ -118,7 +118,7 @@ fun AerisApp(
                 LoadingStage("Building the path", StageStatus.PENDING)
             )
 
-            val drive = DriveAdapter.loadBundledDrive(context)
+            val drive = BundledTripLoader.load(context)
 
             stages = listOf(
                 LoadingStage("Reading drive data", StageStatus.DONE),
